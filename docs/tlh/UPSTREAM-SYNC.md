@@ -44,7 +44,7 @@ Field schema:
 | `date` | Intake integration date (`YYYY-MM-DD`). |
 | `upstream_ref` | Released upstream tag covered by the intake. |
 | `commit` | Exact upstream tag commit SHA. |
-| `intake_type` | `release` for a released stable tag, or exceptional `hotfix` for an isolated urgent fix between release intakes. |
+| `intake_type` | `release` — the only accepted intake type. Any between-release intake would require a separately approved policy change. |
 | `integration_pr` | Fork PR number/link, or `n/a (baseline)` for the baseline row. |
 | `status` | `adopted`, `adopted-with-exceptions`, `rejected`, or `baseline`. |
 | `exceptions` | Array of `{ "ref": "...", "reason": "..." }` objects; empty array when nothing was excluded. |

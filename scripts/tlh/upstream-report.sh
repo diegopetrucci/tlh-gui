@@ -20,6 +20,11 @@
 set -euo pipefail
 
 LEDGER=".upstream-ledger.jsonl"
+
+if ! command -v jq >/dev/null 2>&1; then
+  echo "Error: jq is required but not installed. Install it (e.g. brew install jq) and retry." >&2
+  exit 1
+fi
 STABLE_TAG_PATTERN='^upstream/desktop-v[0-9]+\.[0-9]+\.[0-9]+$'
 
 banner() {
@@ -72,10 +77,22 @@ if [ ! -f "$LEDGER" ]; then
   echo "Ledger not found: $LEDGER" >&2
   LAST_REF=""
 else
-  LAST_ROW=$(tail -n1 "$LEDGER")
-  LAST_REF=$(echo "$LAST_ROW" | grep -o '"upstream_ref":"[^"]*"' | head -n1 | sed 's/"upstream_ref":"//;s/"//')
-  LAST_STATUS=$(echo "$LAST_ROW" | grep -o '"status":"[^"]*"' | head -n1 | sed 's/"status":"//;s/"//')
-  LAST_COMMIT=$(echo "$LAST_ROW" | grep -o '"commit":"[^"]*"' | head -n1 | sed 's/"commit":"//;s/"//')
+  LAST_ROW=$(grep -v '^[[:space:]]*$' "$LEDGER" | tail -n1)
+  if [ -z "$LAST_ROW" ]; then
+    echo "Error: ledger exists but contains no non-empty rows." >&2
+    exit 1
+  fi
+  LAST_REF=$(printf '%s' "$LAST_ROW" | jq -r '.upstream_ref // empty')
+  LAST_STATUS=$(printf '%s' "$LAST_ROW" | jq -r '.status // empty')
+  LAST_COMMIT=$(printf '%s' "$LAST_ROW" | jq -r '.commit // empty')
+  if [ -z "$LAST_REF" ]; then
+    echo "Error: required field 'upstream_ref' is missing or empty in the last ledger row." >&2
+    exit 1
+  fi
+  if [ -z "$LAST_STATUS" ]; then
+    echo "Error: required field 'status' is missing or empty in the last ledger row." >&2
+    exit 1
+  fi
   echo "Last intake ref   : $LAST_REF"
   echo "Last intake status: $LAST_STATUS"
   echo "Last intake commit: $LAST_COMMIT"

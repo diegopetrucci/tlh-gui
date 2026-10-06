@@ -20,6 +20,9 @@ env:
   PRIMARY_NODE_VERSION: "22.x"
   PNPM_VERSION: "9.15.0"
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}-${{ github.ref == 'refs/heads/main' && github.sha || 'latest' }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
