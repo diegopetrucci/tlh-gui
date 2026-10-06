@@ -1,12 +1,3 @@
-# Mirrors upstream .github/workflows/ci.yml jobs 'checks' and 'tests'.
-# When re-syncing on intake, diff the checks/tests jobs against upstream ci.yml;
-# upstream's explanatory comments were intentionally dropped.
-# Omitted upstream jobs: windows-foundation and windows-app-smoke (Windows
-# runners); plugin-forks (out of scope for the fork; runs forkable plugins
-# outside the workspace); provider-model-listing (needs CLAUDE_CODE_OAUTH_TOKEN);
-# package-smoke and node-compat-smoke (packaging/compat smoke, out of scope).
-# No secrets beyond github.token.
-# runs-on changed to ubuntu-latest (free standard runners; repo is public).
 name: tlh CI
 
 on:
