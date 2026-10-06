@@ -109,17 +109,25 @@ else
   if [ "$LATEST_TAG" = "$LAST_TAG_FULL" ]; then
     echo "Fork is current: last intake ($LAST_REF) matches latest stable tag."
   else
-    echo "Newer stable tag available: $LATEST_SHORT (last intake: $LAST_REF)"
-    echo
-    echo "---- Commit count between last intake and latest stable tag ----"
-    if git rev-parse --verify "$LAST_TAG_FULL" >/dev/null 2>&1; then
-      COMMIT_COUNT=$(git rev-list --count "${LAST_TAG_FULL}..${LATEST_TAG}" 2>/dev/null || echo "unknown")
-      echo "Commits in range ${LAST_REF}..${LATEST_SHORT}: $COMMIT_COUNT"
+    LATEST_VER="${LATEST_TAG#upstream/desktop-v}"
+    LAST_VER="${LAST_REF#desktop-v}"
+    HIGHER=$(printf '%s\n%s\n' "$LAST_VER" "$LATEST_VER" | sort -V | tail -n1)
+    if [ "$HIGHER" = "$LATEST_VER" ]; then
+      echo "Newer stable tag available: $LATEST_SHORT (last intake: $LAST_REF)"
       echo
-      echo "---- Diffstat summary (last intake → latest stable tag) ----"
-      git diff --stat "${LAST_TAG_FULL}" "${LATEST_TAG}" 2>/dev/null | tail -n3 || echo "(diffstat unavailable)"
+      echo "---- Commit count between last intake and latest stable tag ----"
+      if git rev-parse --verify "$LAST_TAG_FULL" >/dev/null 2>&1; then
+        COMMIT_COUNT=$(git rev-list --count "${LAST_TAG_FULL}..${LATEST_TAG}" 2>/dev/null || echo "unknown")
+        echo "Commits in range ${LAST_REF}..${LATEST_SHORT}: $COMMIT_COUNT"
+        echo
+        echo "---- Diffstat summary (last intake → latest stable tag) ----"
+        git diff --stat "${LAST_TAG_FULL}" "${LATEST_TAG}" 2>/dev/null | tail -n3 || echo "(diffstat unavailable)"
+      else
+        echo "Cannot resolve $LAST_TAG_FULL locally; skipping commit count and diffstat."
+      fi
     else
-      echo "Cannot resolve $LAST_TAG_FULL locally; skipping commit count and diffstat."
+      echo "Warning: local upstream tags look stale (latest local tag $LATEST_SHORT is older than last intake $LAST_REF)."
+      echo "Suggest running: git fetch upstream"
     fi
   fi
 fi
