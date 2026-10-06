@@ -1,0 +1,193 @@
+# Mirrors upstream .github/workflows/ci.yml jobs 'checks' and 'tests'.
+# When re-syncing on intake, diff the checks/tests jobs against upstream ci.yml;
+# upstream's explanatory comments were intentionally dropped.
+# Omitted upstream jobs: windows-foundation and windows-app-smoke (Windows
+# runners); plugin-forks (out of scope for the fork; runs forkable plugins
+# outside the workspace); provider-model-listing (needs CLAUDE_CODE_OAUTH_TOKEN);
+# package-smoke and node-compat-smoke (packaging/compat smoke, out of scope).
+# No secrets beyond github.token.
+# runs-on changed to ubuntu-latest (free standard runners; repo is public).
+name: tlh CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+env:
+  PRIMARY_NODE_VERSION: "22.x"
+  PNPM_VERSION: "9.15.0"
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ github.ref == 'refs/heads/main' && github.sha || 'latest' }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  checks:
+    name: Checks (ubuntu-latest, Node 22.x)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    permissions:
+      contents: read
+      actions: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check source files for literal NUL bytes
+        run: node scripts/check-source-nul.mjs
+
+      - name: Setup workspace tools
+        uses: ./.github/actions/setup-workspace-tools
+        with:
+          node-version: ${{ env.PRIMARY_NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+
+      - name: Restore workspace caches
+        id: cache
+        timeout-minutes: 1
+        continue-on-error: true
+        uses: ./.github/actions/cache-workspace
+        with:
+          node-version: ${{ env.PRIMARY_NODE_VERSION }}
+          cache-prefix: checks
+          turbo-cache: "true"
+
+      - name: Install dependencies
+        timeout-minutes: 5
+        env:
+          CACHE_RESTORE_OUTCOME: ${{ steps.cache.outcome }}
+        run: bash .github/actions/setup-workspace/install-dependencies.sh
+
+      - name: Build, typecheck, and lint
+        run: pnpm exec turbo run build typecheck lint --cache-dir="${TURBO_CACHE_DIR:-.turbo/cache}" --output-logs=new-only --summarize --concurrency=4
+
+      - name: Check plugin SDK npm version guard
+        run: |
+          set +e
+          node packages/plugin-sdk/scripts/check-npm-version-guard.mjs
+          guard_exit=$?
+          set -e
+          if [[ "$guard_exit" -eq 2 ]]; then
+            echo "::warning::Skipping the plugin SDK npm version guard: the npm registry was unreachable."
+            exit 0
+          fi
+          exit "$guard_exit"
+
+      - name: Check app bundle budgets
+        run: node apps/app/scripts/check-bundle-budget.mjs
+
+      - name: Check provider-literal ratchet
+        run: |
+          git fetch --depth=1 origin "${{ github.base_ref || github.event.repository.default_branch }}" || true
+          node scripts/check-provider-literal-ratchet.mjs --base "origin/${{ github.base_ref || github.event.repository.default_branch }}"
+
+      - name: Check Actions cache usage
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/check-actions-cache-usage.mjs
+
+      - name: Bound saved Turbo cache
+        run: node scripts/prune-turbo-cache.mjs --dir .turbo/cache --max-size-mb 1024
+
+  tests:
+    name: Tests (${{ matrix.shard }}, ubuntu-latest, Node 22.x)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: server-1
+            filter: --filter=@bb/server
+            args: -- --shard=1/2
+          - shard: server-2
+            filter: --filter=@bb/server
+            args: -- --shard=2/2
+          - shard: app-1
+            filter: --filter=@bb/app
+            args: -- --shard=1/3
+          - shard: app-2
+            filter: --filter=@bb/app
+            args: -- --shard=2/3
+          - shard: app-3
+            filter: --filter=@bb/app
+            args: -- --shard=3/3
+          - shard: integration
+            filter: --filter=@bb/integration-tests
+            args: ""
+          - shard: plugins
+            filter: --filter='bb-plugin-*'
+            args: ""
+          - shard: packages-host
+            filter: --filter=@bb/host-daemon --filter=@bb/cli --filter=@bb/agent-runtime --filter=@bb/provider-parity --filter=@bb/db
+            args: ""
+          - shard: packages-build
+            filter: --filter=@bb/templates --filter=bb-app --filter=@bb/demo-server --filter=@bb/desktop --filter=@bb/plugin-build
+            args: ""
+          - shard: packages-other
+            filter: --filter='!@bb/server' --filter='!@bb/app' --filter='!@bb/integration-tests' --filter='!bb-plugin-*' --filter='!@bb/host-daemon' --filter='!@bb/cli' --filter='!@bb/agent-runtime' --filter='!@bb/provider-parity' --filter='!@bb/db' --filter='!@bb/templates' --filter='!bb-app' --filter='!@bb/demo-server' --filter='!@bb/desktop' --filter='!@bb/plugin-build'
+            args: ""
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup workspace tools
+        uses: ./.github/actions/setup-workspace-tools
+        with:
+          node-version: ${{ env.PRIMARY_NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+
+      - name: Restore workspace caches
+        id: cache
+        timeout-minutes: 1
+        continue-on-error: true
+        uses: ./.github/actions/cache-workspace
+        with:
+          node-version: ${{ env.PRIMARY_NODE_VERSION }}
+          cache-prefix: test-${{ matrix.shard }}
+          turbo-cache: "true"
+
+      - name: Install dependencies
+        timeout-minutes: 5
+        env:
+          CACHE_RESTORE_OUTCOME: ${{ steps.cache.outcome }}
+        run: bash .github/actions/setup-workspace/install-dependencies.sh
+
+      - name: Setup Bun
+        if: ${{ startsWith(matrix.shard, 'packages-') || matrix.shard == 'plugins' }}
+        uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76
+        with:
+          bun-version: "1.3.14"
+          no-cache: true
+
+      - name: Install Electron runtime libraries
+        if: ${{ matrix.shard == 'packages-build' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libgtk-3-0t64 libnss3 libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2t64
+          ELECTRON_RUN_AS_NODE=1 pnpm --filter @bb/desktop exec electron --version
+
+      - name: Test
+        run: ${{ matrix.shard == 'packages-build' && 'xvfb-run -a' || '' }} pnpm exec turbo run test ${{ matrix.filter }} --cache-dir="${TURBO_CACHE_DIR:-.turbo/cache}" --output-logs=new-only --summarize --concurrency=4 ${{ matrix.args }}
+
+      - name: Upload test timings
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        timeout-minutes: 1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: test-timings-${{ matrix.shard }}-${{ github.run_attempt }}
+          path: .turbo/runs/*.json
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Bound saved Turbo cache
+        run: node scripts/prune-turbo-cache.mjs --dir .turbo/cache --max-size-mb 1024
