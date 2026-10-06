@@ -19,7 +19,7 @@ describe.each([
     expect(
       hasLinuxWindowArgument({
         argument,
-        argv: ["bb-nightly", argument],
+        argv: ["tlh-gui-nightly", argument],
         platform: "linux",
       }),
     ).toBe(true);
@@ -29,7 +29,7 @@ describe.each([
     expect(
       hasLinuxWindowArgument({
         argument,
-        argv: ["bb-nightly", otherArgument],
+        argv: ["tlh-gui-nightly", otherArgument],
         platform: "linux",
       }),
     ).toBe(false);

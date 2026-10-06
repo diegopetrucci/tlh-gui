@@ -6,7 +6,7 @@ import {
 type DesktopReleaseChannel = "latest" | "nightly";
 
 interface DesktopReleaseInfo {
-  applicationName: "bb" | "bb Nightly";
+  applicationName: "tlh gui" | "tlh gui Nightly";
   channel: DesktopReleaseChannel;
   iconFileName: "icon.png" | "icon-nightly.png";
   releaseTag: "desktop-latest" | "desktop-nightly";
@@ -20,11 +20,11 @@ export function createDesktopReleaseInfo(
   const releaseTag = nightly ? "desktop-nightly" : "desktop-latest";
 
   return {
-    applicationName: nightly ? "bb Nightly" : "bb",
+    applicationName: nightly ? "tlh gui Nightly" : "tlh gui",
     channel,
     iconFileName: nightly ? "icon-nightly.png" : "icon.png",
     releaseTag,
-    updateReleaseBaseUrl: `https://github.com/get-bb/bb/releases/download/${releaseTag}/`,
+    updateReleaseBaseUrl: `https://github.com/diegopetrucci/tlh-gui/releases/download/${releaseTag}/`,
   };
 }
 

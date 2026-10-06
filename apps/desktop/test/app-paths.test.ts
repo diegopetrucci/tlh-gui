@@ -50,9 +50,9 @@ describe("desktop app paths", () => {
 
   it("uses the release-specific icon inside packaged apps", () => {
     const paths: DesktopPathContext = {
-      appPath: "/Applications/bb Nightly.app/Contents/Resources/app.asar",
+      appPath: "/Applications/tlh gui Nightly.app/Contents/Resources/app.asar",
       isPackaged: true,
-      resourcesPath: "/Applications/bb Nightly.app/Contents/Resources",
+      resourcesPath: "/Applications/tlh gui Nightly.app/Contents/Resources",
     };
 
     expect(
@@ -62,7 +62,7 @@ describe("desktop app paths", () => {
       }),
     ).toBe(
       normalize(
-        "/Applications/bb Nightly.app/Contents/Resources/app.asar/assets/icon-nightly.png",
+        "/Applications/tlh gui Nightly.app/Contents/Resources/app.asar/assets/icon-nightly.png",
       ),
     );
   });

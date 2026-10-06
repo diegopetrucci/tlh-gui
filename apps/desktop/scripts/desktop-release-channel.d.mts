@@ -8,15 +8,15 @@ export interface DesktopUpdateMetadataFileNames {
 }
 
 export interface DesktopReleaseConfig {
-  appId: "dev.bb.desktop" | "dev.bb.desktop.nightly";
-  applicationName: "bb" | "bb Nightly";
+  appId: "com.thelastharness.gui" | "com.thelastharness.gui.nightly";
+  applicationName: "tlh gui" | "tlh gui Nightly";
   artifactName: string;
   iconFileName: "icon.png" | "icon-nightly.png";
-  linuxExecutableName: "bb" | "bb-nightly";
+  linuxExecutableName: "tlh-gui" | "tlh-gui-nightly";
   macIconPath: "assets/icon.icns" | "assets/icon-nightly.icns";
   releaseTag: "desktop-latest" | "desktop-nightly";
   updateMetadataFileNames: DesktopUpdateMetadataFileNames;
-  windowsInstallName: "bb" | "bb-nightly";
+  windowsInstallName: "tlh-gui" | "tlh-gui-nightly";
 }
 
 export function resolveDesktopReleaseChannel(
