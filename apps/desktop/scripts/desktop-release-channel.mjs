@@ -33,16 +33,16 @@ export function resolveDesktopBuildPlatform(nodePlatform) {
 export function createDesktopReleaseConfig(channel) {
   if (channel === "nightly") {
     return {
-      appId: "dev.bb.desktop.nightly",
-      applicationName: "bb Nightly",
-      artifactName: "bb-nightly-${version}-${arch}.${ext}",
+      appId: "com.thelastharness.gui.nightly",
+      applicationName: "tlh gui Nightly",
+      artifactName: "tlh-gui-nightly-${version}-${arch}.${ext}",
       iconFileName: "icon-nightly.png",
       // The Linux binary name must differ from stable so both channels can be
       // installed at once without one shadowing the other on PATH.
-      linuxExecutableName: "bb-nightly",
+      linuxExecutableName: "tlh-gui-nightly",
       macIconPath: "assets/icon-nightly.icns",
       releaseTag: "desktop-nightly",
-      windowsInstallName: "bb-nightly",
+      windowsInstallName: "tlh-gui-nightly",
       updateMetadataFileNames: {
         linux: "nightly-linux.yml",
         macos: "nightly-mac.yml",
@@ -52,14 +52,14 @@ export function createDesktopReleaseConfig(channel) {
   }
 
   return {
-    appId: "dev.bb.desktop",
-    applicationName: "bb",
-    artifactName: "${productName}-${version}-${arch}.${ext}",
+    appId: "com.thelastharness.gui",
+    applicationName: "tlh gui",
+    artifactName: "tlh-gui-${version}-${arch}.${ext}",
     iconFileName: "icon.png",
-    linuxExecutableName: "bb",
+    linuxExecutableName: "tlh-gui",
     macIconPath: "assets/icon.icns",
     releaseTag: "desktop-latest",
-    windowsInstallName: "bb",
+    windowsInstallName: "tlh-gui",
     updateMetadataFileNames: {
       linux: "latest-linux.yml",
       macos: "latest-mac.yml",
@@ -69,5 +69,5 @@ export function createDesktopReleaseConfig(channel) {
 }
 
 export function createDesktopUpdateReleaseBaseUrl(releaseTag) {
-  return `https://github.com/get-bb/bb/releases/download/${releaseTag}/`;
+  return `https://github.com/diegopetrucci/tlh-gui/releases/download/${releaseTag}/`;
 }

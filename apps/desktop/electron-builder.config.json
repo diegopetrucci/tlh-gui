@@ -1,7 +1,7 @@
 {
-  "appId": "dev.bb.desktop",
-  "productName": "bb",
-  "artifactName": "${productName}-${version}-${arch}.${ext}",
+  "appId": "com.thelastharness.gui",
+  "productName": "tlh gui",
+  "artifactName": "tlh-gui-${version}-${arch}.${ext}",
   "toolsets": {
     "appimage": "1.0.3"
   },
@@ -33,7 +33,7 @@
     {
       "channel": "latest",
       "provider": "generic",
-      "url": "https://github.com/get-bb/bb/releases/download/desktop-latest/"
+      "url": "https://github.com/diegopetrucci/tlh-gui/releases/download/desktop-latest/"
     }
   ],
   "mac": {
@@ -59,7 +59,7 @@
   },
   "linux": {
     "category": "Development",
-    "executableName": "bb",
+    "executableName": "tlh-gui",
     "icon": "assets/icon.png",
     "target": [{ "target": "AppImage", "arch": ["x64"] }]
   },

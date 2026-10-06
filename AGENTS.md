@@ -1,3 +1,15 @@
+# TLH Fork
+
+This repo (`diegopetrucci/tlh-gui`) is a standalone copy of `get-bb/bb` (not a GitHub fork), maintained for The Last Harness (tlh). Origin: `diegopetrucci/tlh-gui`. Upstream: `get-bb/bb` (fetching main only; tags namespaced as `upstream/*`).
+
+- Sync playbook and intake rules: [`docs/tlh/UPSTREAM-SYNC.md`](docs/tlh/UPSTREAM-SYNC.md)
+- Patch inventory (fork deltas and deliberately unchanged surfaces): [`docs/tlh/patch-inventory.md`](docs/tlh/patch-inventory.md)
+- Intake ledger (one row per upstream tag intake): [`.upstream-ledger.jsonl`](.upstream-ledger.jsonl)
+- Intake rule: released stable `desktop-vX.Y.Z` tags only — never `upstream/main`, nightly, or pre-release tags.
+- Fork rationale for core patches goes in the patch inventory, not in code comments (upstream AGENTS.md forbids code comments).
+
+---
+
 # Codebase Guidelines
 
 ## Task Completion
