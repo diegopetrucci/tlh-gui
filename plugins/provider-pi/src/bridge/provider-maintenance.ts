@@ -19,6 +19,12 @@ import {
   experimental_resolveExecutablePath as resolveExecutablePath,
   experimental_versionFrom as versionFrom,
 } from "@get-bb/plugin-sdk/provider-bridge";
+import {
+  getTlhInstallationStatus,
+  isTlhMode,
+  tlhInstallGuidance,
+  tlhInstallationRun,
+} from "./tlh-maintenance.js";
 import { resolvePiLaunch } from "./rpc-child.js";
 
 const execFileAsync = promisify(execFile);
@@ -173,6 +179,9 @@ export function describePiVersionProbeFailure(error: unknown): string {
 export async function getPiProviderInstallationStatus(
   checkUpdates = true,
 ): Promise<ProviderInstallationStatus> {
+  if (isTlhMode()) {
+    return getTlhInstallationStatus(checkUpdates, PI_MINIMUM_SUPPORTED_VERSION);
+  }
   const launch = resolvePiLaunch(process.env);
   const [resolvedExecutable, probe, latestVersion, npmGlobal] =
     await Promise.all([
@@ -239,6 +248,10 @@ export async function getPiProviderInstallationRun(
       message: `Pi ${action} is no longer available on this host.`,
     };
   }
+  if (isTlhMode()) {
+    const { command, verification } = tlhInstallationRun(status, action);
+    return { available: true, command, verification };
+  }
   return {
     available: true,
     command: await piGlobalInstallCommand(status.executablePath),
@@ -283,7 +296,11 @@ export type PiInstallGate =
       result: ProviderHealthResult;
     };
 
-const INSTALL_GUIDANCE = `Install ${PI_NPM_PACKAGE} ${PI_MINIMUM_SUPPORTED_VERSION} or newer: ${npmGlobalInstallCommand(PI_NPM_PACKAGE).displayCommand}`;
+function installGuidance(): string {
+  return isTlhMode()
+    ? tlhInstallGuidance()
+    : `Install ${PI_NPM_PACKAGE} ${PI_MINIMUM_SUPPORTED_VERSION} or newer: ${npmGlobalInstallCommand(PI_NPM_PACKAGE).displayCommand}`;
+}
 
 async function probePiInstallGate(): Promise<PiInstallGate> {
   const launch = resolvePiLaunch(process.env);
@@ -297,7 +314,7 @@ async function probePiInstallGate(): Promise<PiInstallGate> {
   }
   const probe = await probePiVersion();
   if (probe.version === null) {
-    const statusMessage = `Could not determine the pi version: ${probe.failure}. ${INSTALL_GUIDANCE}`;
+    const statusMessage = `Could not determine the pi version: ${probe.failure}. ${installGuidance()}`;
     return {
       ok: false,
       status: "unknown",
@@ -307,7 +324,7 @@ async function probePiInstallGate(): Promise<PiInstallGate> {
   }
   const installedVersion = probe.version;
   if (compareVersions(installedVersion, PI_MINIMUM_SUPPORTED_VERSION) < 0) {
-    const statusMessage = `Pi ${installedVersion} is older than the supported minimum ${PI_MINIMUM_SUPPORTED_VERSION}. ${INSTALL_GUIDANCE}`;
+    const statusMessage = `Pi ${installedVersion} is older than the supported minimum ${PI_MINIMUM_SUPPORTED_VERSION}. ${installGuidance()}`;
     return {
       ok: false,
       status: "unsupported_version",
