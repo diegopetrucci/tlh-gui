@@ -622,7 +622,7 @@ async function handleModelList(
         ? BRIDGE_JSON_RPC_ERRORS.MISSING_EXECUTABLE
         : -32000,
       gate.status === "not_installed"
-        ? "Could not find the pi CLI on this host. Install @earendil-works/pi-coding-agent and retry."
+        ? "Could not find the tlh CLI on this host. Install The Last Harness from https://github.com/diegopetrucci/the-last-harness and retry."
         : (gate.statusMessage ?? "Pi is not supported on this host."),
     );
     return;

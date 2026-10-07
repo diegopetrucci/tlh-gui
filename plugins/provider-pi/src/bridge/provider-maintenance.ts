@@ -269,7 +269,7 @@ export function piHealthResult(
       minimumSupportedVersion: PI_MINIMUM_SUPPORTED_VERSION,
       canInstall: true,
       canUpdate: status !== "not_installed",
-      loginCommand: "pi",
+      loginCommand: "tlh",
     },
   };
 }
