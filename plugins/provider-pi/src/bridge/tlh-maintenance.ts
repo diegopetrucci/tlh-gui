@@ -20,11 +20,16 @@ const execFileAsync = promisify(execFile);
 
 const TLH_VERSION_PROBE_TIMEOUT_MS = 15_000;
 const GITHUB_RELEASES_TIMEOUT_MS = 10_000;
-const TLH_INSTALL_SCRIPT_URL =
-  "https://github.com/diegopetrucci/the-last-harness/releases/latest/download/install.sh";
 
 const REPO_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u;
 const DEFAULT_REPO = "diegopetrucci/the-last-harness";
+
+const STRICT_SEMVER_RE = /^v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/u;
+
+function strictSemver(s: string): string | null {
+  const match = STRICT_SEMVER_RE.exec(s);
+  return match?.[1] ?? null;
+}
 
 const installStateSchema = z.object({
   schemaVersion: z.literal(1),
@@ -97,7 +102,7 @@ export async function fetchTlhLatestRelease(
     const releaseSchema = z.object({ tag_name: z.string().min(1) });
     const body = releaseSchema.safeParse(await response.json());
     if (!body.success) return null;
-    return versionFrom(body.data.tag_name);
+    return strictSemver(body.data.tag_name);
   } catch {
     return null;
   } finally {
@@ -105,8 +110,9 @@ export async function fetchTlhLatestRelease(
   }
 }
 
-export function tlhInstallerCommand(): ProviderInstallationCommand {
-  return downloadedInstallerCommand(TLH_INSTALL_SCRIPT_URL);
+export function tlhInstallerCommand(repo: string = DEFAULT_REPO): ProviderInstallationCommand {
+  const url = `https://github.com/${repo}/releases/latest/download/install.sh`;
+  return downloadedInstallerCommand(url);
 }
 
 export function tlhUpdateCommand(): ProviderInstallationCommand {
@@ -116,8 +122,10 @@ export function tlhUpdateCommand(): ProviderInstallationCommand {
   return { command, args, displayCommand: formatCommand(command, args) };
 }
 
-export function tlhInstallGuidance(): string {
-  return `Install The Last Harness (tlh): ${tlhInstallerCommand().displayCommand}`;
+export async function tlhInstallGuidance(): Promise<string> {
+  const state = await readTlhInstallState();
+  const repo = state?.repo ?? DEFAULT_REPO;
+  return `Install The Last Harness (tlh): ${tlhInstallerCommand(repo).displayCommand}`;
 }
 
 export async function getTlhInstallationStatus(
@@ -131,9 +139,10 @@ export async function getTlhInstallationStatus(
     readTlhInstallState(),
   ]);
 
+  const repo = installState?.repo ?? DEFAULT_REPO;
   const installed = resolvedExecutable !== null || piVersion !== null;
   const currentVersion =
-    installState !== null ? versionFrom(installState.ref) : null;
+    installState !== null ? strictSemver(installState.ref) : null;
   const latestVersion =
     checkUpdates && installState?.track === "latest-release"
       ? await fetchTlhLatestRelease(installState.repo)
@@ -157,7 +166,7 @@ export async function getTlhInstallationStatus(
 
   const installActionCommand =
     actionKind === "install"
-      ? tlhInstallerCommand().displayCommand
+      ? tlhInstallerCommand(repo).displayCommand
       : actionKind === "update"
         ? tlhUpdateCommand().displayCommand
         : null;
@@ -187,15 +196,17 @@ export async function getTlhInstallationStatus(
   };
 }
 
-export function tlhInstallationRun(
+export async function tlhInstallationRun(
   status: ProviderInstallationStatus,
   action: "install" | "update",
-): {
+): Promise<{
   command: ProviderInstallationCommand;
   verification: ProviderInstallationVerification;
-} {
+}> {
+  const installState = await readTlhInstallState();
+  const repo = installState?.repo ?? DEFAULT_REPO;
   const command =
-    action === "install" ? tlhInstallerCommand() : tlhUpdateCommand();
+    action === "install" ? tlhInstallerCommand(repo) : tlhUpdateCommand();
   let verification: ProviderInstallationVerification;
   if (action === "install") {
     verification = { kind: "installed" };

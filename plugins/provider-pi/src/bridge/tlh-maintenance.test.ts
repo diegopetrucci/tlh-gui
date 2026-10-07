@@ -370,7 +370,7 @@ describe("getTlhInstallationStatus — non-release track", () => {
 });
 
 describe("tlhInstallationRun", () => {
-  it("returns the TLH installer for install action", () => {
+  it("returns the TLH installer for install action", async () => {
     const status = {
       currentVersion: "0.10.0",
       latestVersion: null,
@@ -385,7 +385,7 @@ describe("tlhInstallationRun", () => {
       needsUpdate: false,
       versionUnsupported: false,
     };
-    const result = tlhInstallationRun(status, "install");
+    const result = await tlhInstallationRun(status, "install");
     expect(result.command).toMatchObject({
       command: "sh",
       args: expect.arrayContaining([expect.stringContaining("install.sh")]),
@@ -393,7 +393,7 @@ describe("tlhInstallationRun", () => {
     expect(result.verification).toMatchObject({ kind: "installed" });
   });
 
-  it("returns version_at_least verification for update when needsUpdate and latestVersion known", () => {
+  it("returns version_at_least verification for update when needsUpdate and latestVersion known", async () => {
     const status = {
       currentVersion: "0.10.0",
       latestVersion: "0.11.0",
@@ -408,7 +408,7 @@ describe("tlhInstallationRun", () => {
       needsUpdate: true,
       versionUnsupported: false,
     };
-    const result = tlhInstallationRun(status, "update");
+    const result = await tlhInstallationRun(status, "update");
     expect(result.command).toMatchObject({ command: "tlh", args: ["update"] });
     expect(result.verification).toMatchObject({
       kind: "version_at_least",
@@ -416,7 +416,7 @@ describe("tlhInstallationRun", () => {
     });
   });
 
-  it("returns installed verification for unsupported-only update (latestVersion null)", () => {
+  it("returns installed verification for unsupported-only update (latestVersion null)", async () => {
     const status = {
       currentVersion: "0.10.0",
       latestVersion: null,
@@ -431,12 +431,12 @@ describe("tlhInstallationRun", () => {
       needsUpdate: false,
       versionUnsupported: true,
     };
-    const result = tlhInstallationRun(status, "update");
+    const result = await tlhInstallationRun(status, "update");
     expect(result.command).toMatchObject({ command: "tlh", args: ["update"] });
     expect(result.verification).toMatchObject({ kind: "installed" });
   });
 
-  it("returns installed verification for unsupported-only update (needsUpdate false, latestVersion known)", () => {
+  it("returns installed verification for unsupported-only update (needsUpdate false, latestVersion known)", async () => {
     const status = {
       currentVersion: "0.10.0",
       latestVersion: "0.10.0",
@@ -451,7 +451,7 @@ describe("tlhInstallationRun", () => {
       needsUpdate: false,
       versionUnsupported: true,
     };
-    const result = tlhInstallationRun(status, "update");
+    const result = await tlhInstallationRun(status, "update");
     expect(result.verification).toMatchObject({ kind: "installed" });
   });
 });
@@ -527,5 +527,158 @@ describe("getTlhInstallationStatus — resolveExecutablePath uses launch command
     expect(experimental_resolveExecutablePath).toHaveBeenCalledWith("/abs/path/tlh");
     expect(status.installed).toBe(true);
     expect(status.minimumSupportedVersion).toBeNull();
+  });
+});
+
+describe("strict version parsing — install-state ref", () => {
+  beforeEach(() => {
+    mockState.resolvedExecutable = "/usr/local/bin/tlh";
+    mockState.execFileResult = "0.84.0\n";
+  });
+
+  it("currentVersion is null when ref is a branch name like 'main'", async () => {
+    mockState.readFileResult = JSON.stringify({
+      schemaVersion: 1,
+      repo: "diegopetrucci/the-last-harness",
+      track: "dev",
+      ref: "main",
+    });
+    const status = await getTlhInstallationStatus(false, "0.84.0");
+    expect(status.currentVersion).toBeNull();
+  });
+
+  it("currentVersion is null when ref is 'feature/1.2.3'", async () => {
+    mockState.readFileResult = JSON.stringify({
+      schemaVersion: 1,
+      repo: "diegopetrucci/the-last-harness",
+      track: "dev",
+      ref: "feature/1.2.3",
+    });
+    const status = await getTlhInstallationStatus(false, "0.84.0");
+    expect(status.currentVersion).toBeNull();
+  });
+
+  it("currentVersion is null when ref is an incomplete semver like 'v1.2'", async () => {
+    mockState.readFileResult = JSON.stringify({
+      schemaVersion: 1,
+      repo: "diegopetrucci/the-last-harness",
+      track: "latest-release",
+      ref: "v1.2",
+    });
+    const status = await getTlhInstallationStatus(false, "0.84.0");
+    expect(status.currentVersion).toBeNull();
+  });
+
+  it("currentVersion is parsed when ref is a valid semver tag", async () => {
+    mockState.readFileResult = JSON.stringify({
+      schemaVersion: 1,
+      repo: "diegopetrucci/the-last-harness",
+      track: "latest-release",
+      ref: "v1.2.3",
+    });
+    const status = await getTlhInstallationStatus(false, "0.84.0");
+    expect(status.currentVersion).toBe("1.2.3");
+  });
+
+  it("currentVersion is parsed when ref has a pre-release suffix", async () => {
+    mockState.readFileResult = JSON.stringify({
+      schemaVersion: 1,
+      repo: "diegopetrucci/the-last-harness",
+      track: "latest-release",
+      ref: "v1.2.3-beta.1",
+    });
+    const status = await getTlhInstallationStatus(false, "0.84.0");
+    expect(status.currentVersion).toBe("1.2.3-beta.1");
+  });
+});
+
+describe("strict version parsing — GitHub tag_name", () => {
+  it("returns null when tag_name is 'main'", async () => {
+    vi.stubGlobal("fetch", makeFetchMock({ tag_name: "main" }));
+    expect(await fetchTlhLatestRelease("diegopetrucci/the-last-harness")).toBeNull();
+  });
+
+  it("returns null when tag_name is 'feature/1.2.3'", async () => {
+    vi.stubGlobal("fetch", makeFetchMock({ tag_name: "feature/1.2.3" }));
+    expect(await fetchTlhLatestRelease("diegopetrucci/the-last-harness")).toBeNull();
+  });
+
+  it("returns null when tag_name is an incomplete semver like 'v1.2'", async () => {
+    vi.stubGlobal("fetch", makeFetchMock({ tag_name: "v1.2" }));
+    expect(await fetchTlhLatestRelease("diegopetrucci/the-last-harness")).toBeNull();
+  });
+});
+
+describe("installer repo — custom repo from install-state", () => {
+  it("tlhInstallerCommand with custom repo builds URL from that repo", () => {
+    const cmd = tlhInstallerCommand("myorg/my-agent");
+    expect(cmd.displayCommand).toContain("myorg/my-agent");
+    expect(cmd.displayCommand).toContain("install.sh");
+  });
+
+  it("tlhInstallerCommand defaults to diegopetrucci/the-last-harness when called with no argument", () => {
+    const cmd = tlhInstallerCommand();
+    expect(cmd.displayCommand).toContain("diegopetrucci/the-last-harness");
+  });
+
+  it("getTlhInstallationStatus uses custom repo in installAction command when not installed", async () => {
+    mockState.resolvedExecutable = null;
+    mockState.execFileResult = null;
+    mockState.readFileResult = JSON.stringify({
+      schemaVersion: 1,
+      repo: "myorg/my-agent",
+      track: "latest-release",
+      ref: "v0.10.0",
+    });
+    const status = await getTlhInstallationStatus(true, "0.84.0");
+    expect(status.installAction?.command).toContain("myorg/my-agent");
+    expect(status.installAction?.command).toContain("install.sh");
+  });
+
+  it("tlhInstallationRun uses custom repo from install-state for install command", async () => {
+    mockState.readFileResult = JSON.stringify({
+      schemaVersion: 1,
+      repo: "myorg/my-agent",
+      track: "latest-release",
+      ref: "v0.10.0",
+    });
+    const status = {
+      currentVersion: null,
+      latestVersion: null,
+      executableName: "tlh",
+      executablePath: null,
+      installed: false,
+      installSource: "external" as const,
+      npmPackageName: null,
+      npmGlobalPackageVersion: null,
+      minimumSupportedVersion: null,
+      installAction: { kind: "install" as const, label: "Install" as const, command: "" },
+      needsUpdate: false,
+      versionUnsupported: false,
+    };
+    const result = await tlhInstallationRun(status, "install");
+    expect(result.command.displayCommand).toContain("myorg/my-agent");
+    expect(result.command.displayCommand).toContain("install.sh");
+  });
+
+  it("tlhInstallationRun defaults to diegopetrucci/the-last-harness when install-state is missing", async () => {
+    mockState.readFileResult = null;
+    const status = {
+      currentVersion: null,
+      latestVersion: null,
+      executableName: "tlh",
+      executablePath: null,
+      installed: false,
+      installSource: "external" as const,
+      npmPackageName: null,
+      npmGlobalPackageVersion: null,
+      minimumSupportedVersion: null,
+      installAction: { kind: "install" as const, label: "Install" as const, command: "" },
+      needsUpdate: false,
+      versionUnsupported: false,
+    };
+    const result = await tlhInstallationRun(status, "install");
+    expect(result.command.displayCommand).toContain("diegopetrucci/the-last-harness");
+    expect(result.command.displayCommand).toContain("install.sh");
   });
 });

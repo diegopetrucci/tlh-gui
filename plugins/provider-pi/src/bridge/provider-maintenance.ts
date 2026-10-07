@@ -249,7 +249,7 @@ export async function getPiProviderInstallationRun(
     };
   }
   if (isTlhMode()) {
-    const { command, verification } = tlhInstallationRun(status, action);
+    const { command, verification } = await tlhInstallationRun(status, action);
     return { available: true, command, verification };
   }
   return {
@@ -296,7 +296,7 @@ export type PiInstallGate =
       result: ProviderHealthResult;
     };
 
-function installGuidance(): string {
+async function installGuidance(): Promise<string> {
   return isTlhMode()
     ? tlhInstallGuidance()
     : `Install ${PI_NPM_PACKAGE} ${PI_MINIMUM_SUPPORTED_VERSION} or newer: ${npmGlobalInstallCommand(PI_NPM_PACKAGE).displayCommand}`;
@@ -314,7 +314,7 @@ async function probePiInstallGate(): Promise<PiInstallGate> {
   }
   const probe = await probePiVersion();
   if (probe.version === null) {
-    const statusMessage = `Could not determine the pi version: ${probe.failure}. ${installGuidance()}`;
+    const statusMessage = `Could not determine the pi version: ${probe.failure}. ${await installGuidance()}`;
     return {
       ok: false,
       status: "unknown",
@@ -324,7 +324,7 @@ async function probePiInstallGate(): Promise<PiInstallGate> {
   }
   const installedVersion = probe.version;
   if (compareVersions(installedVersion, PI_MINIMUM_SUPPORTED_VERSION) < 0) {
-    const statusMessage = `Pi ${installedVersion} is older than the supported minimum ${PI_MINIMUM_SUPPORTED_VERSION}. ${installGuidance()}`;
+    const statusMessage = `Pi ${installedVersion} is older than the supported minimum ${PI_MINIMUM_SUPPORTED_VERSION}. ${await installGuidance()}`;
     return {
       ok: false,
       status: "unsupported_version",
