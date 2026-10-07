@@ -22,6 +22,7 @@ import {
 import {
   getTlhInstallationStatus,
   isTlhMode,
+  piLoginCommand,
   tlhInstallGuidance,
   tlhInstallationRun,
 } from "./tlh-maintenance.js";
@@ -241,6 +242,12 @@ export async function getPiProviderInstallationStatus(
 export async function getPiProviderInstallationRun(
   action: "install" | "update",
 ): Promise<ProviderInstallationRunResult> {
+  if (isTlhMode() && action === "install" && process.platform === "win32") {
+    return {
+      available: false,
+      message: "The Last Harness installer requires bash, macOS, or Linux.",
+    };
+  }
   const status = await getPiProviderInstallationStatus();
   if (status.installAction?.kind !== action) {
     return {
@@ -282,7 +289,7 @@ export function piHealthResult(
       minimumSupportedVersion: PI_MINIMUM_SUPPORTED_VERSION,
       canInstall: true,
       canUpdate: status !== "not_installed",
-      loginCommand: "tlh",
+      loginCommand: piLoginCommand(),
     },
   };
 }

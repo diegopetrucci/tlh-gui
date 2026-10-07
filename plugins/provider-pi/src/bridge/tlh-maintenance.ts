@@ -24,7 +24,8 @@ const GITHUB_RELEASES_TIMEOUT_MS = 10_000;
 const REPO_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u;
 const DEFAULT_REPO = "diegopetrucci/the-last-harness";
 
-const STRICT_SEMVER_RE = /^v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/u;
+const STRICT_SEMVER_RE =
+  /^v?((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?)\s*$/u;
 
 function strictSemver(s: string): string | null {
   const match = STRICT_SEMVER_RE.exec(s);
@@ -148,11 +149,16 @@ export async function getTlhInstallationStatus(
       ? await fetchTlhLatestRelease(installState.repo)
       : null;
 
-  const needsUpdate =
-    installed &&
-    currentVersion !== null &&
-    latestVersion !== null &&
-    compareVersions(latestVersion, currentVersion) > 0;
+  let needsUpdate = false;
+  try {
+    needsUpdate =
+      installed &&
+      currentVersion !== null &&
+      latestVersion !== null &&
+      compareVersions(latestVersion, currentVersion) > 0;
+  } catch {
+    needsUpdate = false;
+  }
   const versionUnsupported =
     installed &&
     piVersion !== null &&
@@ -172,7 +178,10 @@ export async function getTlhInstallationStatus(
         : null;
 
   const installAction: ProviderInstallationStatus["installAction"] =
-    actionKind === null || !checkUpdates || installActionCommand === null
+    actionKind === null ||
+    !checkUpdates ||
+    installActionCommand === null ||
+    (actionKind === "install" && process.platform === "win32")
       ? null
       : {
           kind: actionKind,
@@ -216,4 +225,14 @@ export async function tlhInstallationRun(
     verification = { kind: "installed" };
   }
   return { command, verification };
+}
+
+export function tlhNotInstalledMessage(): string {
+  return isTlhMode()
+    ? "Could not find the tlh CLI on this host. Install The Last Harness from https://github.com/diegopetrucci/the-last-harness and retry."
+    : "Could not find the pi CLI on this host. Install @earendil-works/pi-coding-agent and retry.";
+}
+
+export function piLoginCommand(): string {
+  return isTlhMode() ? "tlh" : "pi";
 }

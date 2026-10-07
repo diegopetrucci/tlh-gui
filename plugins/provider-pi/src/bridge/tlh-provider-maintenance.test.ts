@@ -30,6 +30,7 @@ vi.mock("./rpc-child.js", () => ({
 import {
   getPiProviderInstallationRun,
   getPiProviderInstallationStatus,
+  piHealthResult,
 } from "./provider-maintenance.js";
 
 afterEach(() => {
@@ -62,5 +63,40 @@ describe("non-tlh command keeps upstream npm behavior", () => {
         command: expect.stringContaining("npm"),
       },
     });
+  });
+});
+
+describe("piHealthResult loginCommand — mode-aware", () => {
+  it("returns 'pi' when command is pi (non-tlh mode)", () => {
+    mockState.command = "pi";
+    expect(piHealthResult("ready")).toMatchObject({ health: { loginCommand: "pi" } });
+  });
+
+  it("returns 'tlh' when command is tlh (tlh mode)", () => {
+    mockState.command = "tlh";
+    expect(piHealthResult("ready")).toMatchObject({ health: { loginCommand: "tlh" } });
+  });
+});
+
+describe("getPiProviderInstallationRun — Windows win32 guard in tlh mode", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("returns available:false with bash message for install action on win32 in tlh mode", async () => {
+    mockState.command = "tlh";
+    vi.spyOn(process, "platform", "get").mockReturnValue("win32");
+    const result = await getPiProviderInstallationRun("install");
+    expect(result).toMatchObject({
+      available: false,
+      message: expect.stringContaining("bash"),
+    });
+  });
+
+  it("does not trigger win32 guard when command is not tlh", async () => {
+    mockState.command = "pi";
+    vi.spyOn(process, "platform", "get").mockReturnValue("win32");
+    const result = await getPiProviderInstallationRun("install");
+    expect((result as { message?: string }).message).not.toMatch(/bash/);
   });
 });

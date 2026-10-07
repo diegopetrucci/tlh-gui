@@ -65,6 +65,7 @@ import {
   piHealthResult,
   resetPiInstallGateForTests,
 } from "./provider-maintenance.js";
+import { tlhNotInstalledMessage } from "./tlh-maintenance.js";
 import {
   closeAllPiCatalogs,
   createLiveContextWindowResolver,
@@ -622,7 +623,7 @@ async function handleModelList(
         ? BRIDGE_JSON_RPC_ERRORS.MISSING_EXECUTABLE
         : -32000,
       gate.status === "not_installed"
-        ? "Could not find the tlh CLI on this host. Install The Last Harness from https://github.com/diegopetrucci/the-last-harness and retry."
+        ? tlhNotInstalledMessage()
         : (gate.statusMessage ?? "Pi is not supported on this host."),
     );
     return;

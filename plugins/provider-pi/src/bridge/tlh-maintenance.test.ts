@@ -53,9 +53,11 @@ import {
   fetchTlhLatestRelease,
   getTlhInstallationStatus,
   isTlhMode,
+  piLoginCommand,
   readTlhInstallState,
   tlhInstallerCommand,
   tlhInstallationRun,
+  tlhNotInstalledMessage,
   tlhUpdateCommand,
 } from "./tlh-maintenance.js";
 
@@ -680,5 +682,129 @@ describe("installer repo — custom repo from install-state", () => {
     const result = await tlhInstallationRun(status, "install");
     expect(result.command.displayCommand).toContain("diegopetrucci/the-last-harness");
     expect(result.command.displayCommand).toContain("install.sh");
+  });
+});
+
+describe("strictSemver — rejects invalid semver (via getTlhInstallationStatus ref)", () => {
+  beforeEach(() => {
+    mockState.resolvedExecutable = "/usr/local/bin/tlh";
+    mockState.execFileResult = "0.84.0\n";
+  });
+
+  it("currentVersion is null for ref 'v1.2.3-..'", async () => {
+    mockState.readFileResult = JSON.stringify({
+      schemaVersion: 1,
+      repo: "diegopetrucci/the-last-harness",
+      track: "latest-release",
+      ref: "v1.2.3-..",
+    });
+    const status = await getTlhInstallationStatus(false, "0.84.0");
+    expect(status.currentVersion).toBeNull();
+  });
+
+  it("currentVersion is null for ref '01.2.3'", async () => {
+    mockState.readFileResult = JSON.stringify({
+      schemaVersion: 1,
+      repo: "diegopetrucci/the-last-harness",
+      track: "latest-release",
+      ref: "01.2.3",
+    });
+    const status = await getTlhInstallationStatus(false, "0.84.0");
+    expect(status.currentVersion).toBeNull();
+  });
+
+  it("currentVersion is null for ref '1.2.3-01'", async () => {
+    mockState.readFileResult = JSON.stringify({
+      schemaVersion: 1,
+      repo: "diegopetrucci/the-last-harness",
+      track: "latest-release",
+      ref: "1.2.3-01",
+    });
+    const status = await getTlhInstallationStatus(false, "0.84.0");
+    expect(status.currentVersion).toBeNull();
+  });
+});
+
+describe("strictSemver — rejects invalid semver (via fetchTlhLatestRelease)", () => {
+  it("returns null for tag_name 'v1.2.3-..'", async () => {
+    vi.stubGlobal("fetch", makeFetchMock({ tag_name: "v1.2.3-.." }));
+    expect(await fetchTlhLatestRelease("diegopetrucci/the-last-harness")).toBeNull();
+  });
+
+  it("returns null for tag_name '01.2.3'", async () => {
+    vi.stubGlobal("fetch", makeFetchMock({ tag_name: "01.2.3" }));
+    expect(await fetchTlhLatestRelease("diegopetrucci/the-last-harness")).toBeNull();
+  });
+
+  it("returns null for tag_name '1.2.3-01'", async () => {
+    vi.stubGlobal("fetch", makeFetchMock({ tag_name: "1.2.3-01" }));
+    expect(await fetchTlhLatestRelease("diegopetrucci/the-last-harness")).toBeNull();
+  });
+});
+
+describe("getTlhInstallationStatus — Windows (win32)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("installAction is null when not installed on win32", async () => {
+    vi.spyOn(process, "platform", "get").mockReturnValue("win32");
+    mockState.resolvedExecutable = null;
+    mockState.execFileResult = null;
+    mockState.readFileResult = null;
+    const status = await getTlhInstallationStatus(true, "0.84.0");
+    expect(status.installed).toBe(false);
+    expect(status.installAction).toBeNull();
+  });
+
+  it("installAction is present (install) on non-win32 when not installed", async () => {
+    vi.spyOn(process, "platform", "get").mockReturnValue("linux");
+    mockState.resolvedExecutable = null;
+    mockState.execFileResult = null;
+    mockState.readFileResult = null;
+    const status = await getTlhInstallationStatus(true, "0.84.0");
+    expect(status.installed).toBe(false);
+    expect(status.installAction).not.toBeNull();
+    expect(status.installAction?.kind).toBe("install");
+  });
+
+  it("installAction is still present (update) on win32 when update needed", async () => {
+    vi.spyOn(process, "platform", "get").mockReturnValue("win32");
+    mockState.resolvedExecutable = "/usr/local/bin/tlh";
+    mockState.execFileResult = "0.84.0\n";
+    mockState.readFileResult = JSON.stringify({
+      schemaVersion: 1,
+      repo: "diegopetrucci/the-last-harness",
+      track: "latest-release",
+      ref: "v0.10.0",
+    });
+    vi.stubGlobal("fetch", makeFetchMock({ tag_name: "v0.11.0" }));
+    const status = await getTlhInstallationStatus(true, "0.84.0");
+    expect(status.installAction?.kind).toBe("update");
+  });
+});
+
+describe("mode-aware string helpers", () => {
+  it("tlhNotInstalledMessage returns tlh string in tlh mode", () => {
+    mockState.command = "tlh";
+    expect(tlhNotInstalledMessage()).toContain("tlh CLI");
+    expect(tlhNotInstalledMessage()).toContain("The Last Harness");
+  });
+
+  it("tlhNotInstalledMessage returns upstream pi string in non-tlh mode", () => {
+    mockState.command = "pi";
+    expect(tlhNotInstalledMessage()).toBe(
+      "Could not find the pi CLI on this host. Install @earendil-works/pi-coding-agent and retry.",
+    );
+  });
+
+  it("piLoginCommand returns 'tlh' in tlh mode", () => {
+    mockState.command = "tlh";
+    expect(piLoginCommand()).toBe("tlh");
+  });
+
+  it("piLoginCommand returns 'pi' in non-tlh mode", () => {
+    mockState.command = "pi";
+    expect(piLoginCommand()).toBe("pi");
   });
 });

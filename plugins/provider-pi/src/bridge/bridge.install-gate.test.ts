@@ -41,7 +41,7 @@ it("reports ready with the installed version after the get_state probe", async (
       minimumSupportedVersion: "0.84.0",
       canInstall: true,
       canUpdate: true,
-      loginCommand: "tlh",
+      loginCommand: "pi",
     },
   });
 }, 30_000);
@@ -81,7 +81,7 @@ it("reports not_installed when the launch command is missing", async () => {
   });
   expect(models.error).toMatchObject({
     code: BRIDGE_JSON_RPC_ERRORS.MISSING_EXECUTABLE,
-    message: expect.stringContaining("Could not find the tlh CLI"),
+    message: expect.stringContaining("Could not find the pi CLI"),
   });
 });
 
