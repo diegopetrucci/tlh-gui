@@ -65,15 +65,17 @@ git config --replace-all remote.upstream.fetch '+refs/heads/main:refs/remotes/up
 git config --add remote.upstream.fetch '+refs/tags/*:refs/tags/upstream/*'
 git config remote.upstream.tagOpt --no-tags
 git config remote.upstream.pruneTags false
+git config remote.origin.pruneTags false
 git config push.followTags false
 git fetch upstream
 ```
 
-**Verification:** `git tag -l | grep -v '^upstream/'` should print nothing (all fetched upstream tags land under `upstream/*`).
+**Verification:** `git tag -l | grep -v '^upstream/'` should print nothing (all fetched upstream tags land under `upstream/*`). A subsequent `git fetch origin` should leave `git tag -l 'upstream/*'` non-empty.
 
 These repo-local configs are intentional:
 - `remote.upstream.tagOpt=--no-tags`: stops automatic tag following into the plain `refs/tags` namespace on every `git fetch upstream`.
 - `remote.upstream.pruneTags=false`: required because a global `fetch.pruneTags=true` makes git fetch add an implicit `refs/tags/*:refs/tags/*` refspec, which would create un-namespaced copies of upstream tags (observed during bootstrap). This setting suppresses that behaviour for the upstream remote.
+- `remote.origin.pruneTags=false`: with a global `fetch.pruneTags=true`, `git fetch origin` prunes every local tag that origin lacks; because `upstream/*` tags are never pushed to origin, all of them would be deleted (observed after the bootstrap PR merge — all upstream tags were removed and had to be re-fetched). This setting preserves namespaced upstream tags across origin fetches.
 - `push.followTags=false`: stops a global `push.followTags=true` from pushing upstream's annotated tags to origin.
 
 The prefix-namespaced tag refspec (`+refs/tags/*:refs/tags/upstream/*`) means moving upstream tags (`desktop-latest`, `desktop-nightly`) are force-updated under `upstream/*` and never collide with fork tags. Fork release tags use `tlh-gui-v*`.
