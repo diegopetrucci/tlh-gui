@@ -7,9 +7,9 @@ export function piProviderDeclaration(): PluginProviderDeclaration {
     displayName: "Pi",
     icon: "./icons/pi.svg",
     strings: {
-      signInHint: "Run `pi` on the machine to sign in.",
-      expiredHint: "Your Pi session expired. Run `pi`, then reload.",
-      installUrl: "https://pi.dev",
+      signInHint: "Run `tlh` on the machine to sign in.",
+      expiredHint: "Your Pi session expired. Run `tlh`, then reload.",
+      installUrl: "https://github.com/diegopetrucci/the-last-harness",
       iconTint: { light: "#6D5DFB", dark: "#6D5DFB" },
     },
     maintenance: { health: true, usage: false, installation: true },

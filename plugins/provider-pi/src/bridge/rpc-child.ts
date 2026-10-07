@@ -70,7 +70,7 @@ export function resolvePiLaunch(env: NodeJS.ProcessEnv): {
 } {
   const command = env[PI_BRIDGE_COMMAND_ENV];
   if (!command) {
-    return { command: "pi", args: [] };
+    return { command: "tlh", args: [] };
   }
   const rawArgs = env[PI_BRIDGE_ARGS_ENV];
   if (!rawArgs) {
