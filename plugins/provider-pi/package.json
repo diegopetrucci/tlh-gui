@@ -3,14 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Run bb threads with Pi.",
+  "description": "Run bb threads with The Last Harness (TLH).",
   "engines": {
     "bb": ">=0.0",
     "bbPluginSdk": ">=0.5.22"
   },
   "bb": {
-    "name": "Pi provider",
-    "description": "Run bb threads with Pi.",
+    "name": "TLH provider",
+    "description": "Run bb threads with The Last Harness (TLH).",
     "branding": {
       "icon": "./icons/pi.svg"
     },
@@ -21,7 +21,7 @@
       {
         "kind": "agent",
         "id": "pi",
-        "displayName": "Pi"
+        "displayName": "TLH"
       }
     ]
   },

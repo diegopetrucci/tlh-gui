@@ -10,7 +10,7 @@ const FIRST_PARTY_PROVIDER_DECLARATIONS = [
     builtinName: "provider-pi",
     pluginId: "provider-pi",
     providerId: "pi",
-    displayName: "Pi",
+    displayName: "TLH",
     supportsThreadArchive: false,
     supportsThreadRename: false,
     fork: "checkpoint",
@@ -294,7 +294,7 @@ describe("first-party provider plugins", () => {
         });
         expect(clientFields("pi")).toStrictEqual({
           id: "pi",
-          displayName: "Pi",
+          displayName: "TLH",
           logoUrl: expectedLogoUrl(harness.deps.providerRegistry, "pi"),
           available: true,
           maintenance: { health: true, usage: false, installation: true },

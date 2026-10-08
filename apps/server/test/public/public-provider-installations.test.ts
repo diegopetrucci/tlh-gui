@@ -176,7 +176,7 @@ describe("public provider installation routes", () => {
       expect(Object.values(body).map((status) => status.displayName)).toEqual([
         "Codex",
         "Claude Code",
-        "Pi",
+        "TLH",
         "Cursor",
       ]);
       expect(
@@ -237,7 +237,7 @@ describe("public provider installation routes", () => {
       expect(Object.keys(body)).toEqual(["codex", "pi", "acp-cursor"]);
       expect(Object.values(body).map((status) => status.displayName)).toEqual([
         "Codex",
-        "Pi",
+        "TLH",
         "Cursor",
       ]);
       expect(warn).toHaveBeenCalledWith(
