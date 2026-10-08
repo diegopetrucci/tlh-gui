@@ -110,18 +110,18 @@ export const BUILTIN_PLUGINS = [
     defaultEnabled: true,
   },
   {
+    name: "provider-pi",
+    pluginId: "provider-pi",
+    defaultEnabled: true,
+  },
+  {
     name: "provider-codex",
     pluginId: "provider-codex",
-    defaultEnabled: true,
+    defaultEnabled: false,
   },
   {
     name: "provider-claude-code",
     pluginId: "provider-claude-code",
-    defaultEnabled: true,
-  },
-  {
-    name: "provider-pi",
-    pluginId: "provider-pi",
     defaultEnabled: true,
   },
   {
@@ -132,7 +132,7 @@ export const BUILTIN_PLUGINS = [
   {
     name: "provider-acp",
     pluginId: "provider-acp",
-    defaultEnabled: true,
+    defaultEnabled: false,
   },
   {
     name: "keep-awake",
