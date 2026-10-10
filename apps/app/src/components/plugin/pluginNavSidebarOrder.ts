@@ -13,9 +13,7 @@ export const BUILT_IN_SIDEBAR_NAVIGATION_KEYS = {
   automations: "__bb__/automations",
 } as const;
 
-export const DEFAULT_HIDDEN_SIDEBAR_NAVIGATION_KEYS = [
-  BUILT_IN_SIDEBAR_NAVIGATION_KEYS.searchThreads,
-] as const;
+export const DEFAULT_HIDDEN_SIDEBAR_NAVIGATION_KEYS = [] as const;
 
 export const DEFAULT_BUILT_IN_SIDEBAR_NAVIGATION_ORDER = [
   BUILT_IN_SIDEBAR_NAVIGATION_KEYS.newThread,

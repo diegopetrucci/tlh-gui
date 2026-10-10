@@ -128,6 +128,12 @@ const HOST_KEYS = [
 ];
 const DEFAULT_VISIBLE_HOST_KEYS = [
   "__bb__/new-thread",
+  "__bb__/search-threads",
+  "__bb__/extensions",
+  "__bb__/skills",
+];
+const HOST_KEYS_SEARCH_HIDDEN = [
+  "__bb__/new-thread",
   "__bb__/extensions",
   "__bb__/skills",
 ];
@@ -386,14 +392,11 @@ describe("Navigation plugin in the sidebar navigation region", () => {
     ).toBeNull();
   });
 
-  it("shows only the default host rows when no plugin panels are registered", async () => {
+  it("shows only the default host rows when no plugin panels are registered", () => {
     renderNavigation();
 
     expect(visibleRowKeys()).toEqual(DEFAULT_VISIBLE_HOST_KEYS);
-    expect(await openMoreMenu()).toEqual([
-      "Search threads",
-      "Customize sidebar",
-    ]);
+    expect(screen.queryByTestId("sidebar-navigation-more-row")).toBeNull();
   });
 
   it.each([
@@ -565,11 +568,7 @@ describe("Navigation plugin in the sidebar navigation region", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     fireEvent.click(moreTrigger());
     expect(await screen.findByRole("button", { name: "Docs" })).not.toBeNull();
-    expect(menuEntryLabels()).toEqual([
-      "Search threads",
-      "Docs",
-      "Customize sidebar",
-    ]);
+    expect(menuEntryLabels()).toEqual(["Docs", "Customize sidebar"]);
   });
 
   it("opens plugin details and omits split when the layout cannot split", async () => {
@@ -906,9 +905,11 @@ describe("Navigation plugin in the sidebar navigation region", () => {
     renderNavigation({
       compactViewport: true,
       onCustomizingChange,
+      storedOrder: HOST_KEYS,
+      storedVisibleKeys: HOST_KEYS_SEARCH_HIDDEN,
     });
 
-    expect(visibleRowKeys()).toEqual(DEFAULT_VISIBLE_HOST_KEYS);
+    expect(visibleRowKeys()).toEqual(HOST_KEYS_SEARCH_HIDDEN);
     fireEvent.click(moreTrigger());
     fireEvent.click(
       await screen.findByRole("button", { name: "Customize sidebar" }),
@@ -1034,7 +1035,10 @@ describe("Navigation plugin in the sidebar navigation region", () => {
   });
 
   it("focuses the More popover itself instead of its first row on open", async () => {
-    renderNavigation();
+    renderNavigation({
+      storedOrder: HOST_KEYS,
+      storedVisibleKeys: HOST_KEYS_SEARCH_HIDDEN,
+    });
 
     await openMoreMenu();
 
@@ -1046,7 +1050,10 @@ describe("Navigation plugin in the sidebar navigation region", () => {
   });
 
   it("returns focus to More after Done when Customize was opened from More", async () => {
-    renderNavigation();
+    renderNavigation({
+      storedOrder: HOST_KEYS,
+      storedVisibleKeys: HOST_KEYS_SEARCH_HIDDEN,
+    });
 
     await openMoreMenu();
     await openCustomizeFromMore();
@@ -1131,13 +1138,10 @@ describe("Navigation plugin in the sidebar navigation region", () => {
       ...DEFAULT_VISIBLE_HOST_KEYS,
       ...labels.map((_, index) => `plugin-${index}/main`),
     ]);
-    expect(await openMoreMenu()).toEqual([
-      "Search threads",
-      "Customize sidebar",
-    ]);
+    expect(screen.queryByTestId("sidebar-navigation-more-row")).toBeNull();
   });
 
-  it("hides only Search by default and offers it under More", async () => {
+  it("offers a saved-hidden Search under More", async () => {
     const labels = ["One", "Two", "Three", "Four"];
     labels.forEach((label, index) => registerPanel(`plugin-${index}`, label));
     renderNavigation({
@@ -1146,6 +1150,15 @@ describe("Navigation plugin in the sidebar navigation region", () => {
         "__bb__/new-thread",
         "plugin-1/main",
         "__bb__/search-threads",
+        "plugin-2/main",
+        "__bb__/extensions",
+        "__bb__/skills",
+        "plugin-3/main",
+      ],
+      storedVisibleKeys: [
+        "plugin-0/main",
+        "__bb__/new-thread",
+        "plugin-1/main",
         "plugin-2/main",
         "__bb__/extensions",
         "__bb__/skills",
@@ -1417,7 +1430,7 @@ describe("Navigation plugin in the sidebar navigation region", () => {
     );
     expect(choices.map((choice) => choice.getAttribute("data-state"))).toEqual([
       "checked",
-      "unchecked",
+      "checked",
       "checked",
       "checked",
       "checked",
@@ -1457,7 +1470,7 @@ describe("Navigation plugin in the sidebar navigation region", () => {
     expect(screen.queryByRole("button", { name: "One" })).toBeNull();
 
     const items = await openMoreMenu();
-    expect(items).toEqual(["Search threads", "One", "Customize sidebar"]);
+    expect(items).toEqual(["One", "Customize sidebar"]);
     fireEvent.click(screen.getByRole("button", { name: "One" }));
 
     expect(screen.getByTestId("location-path").textContent).toBe(
@@ -1494,6 +1507,7 @@ describe("Navigation plugin in the sidebar navigation region", () => {
       const initialVisibleKeys = visibleRowKeys();
       expect(initialVisibleKeys).toEqual([
         "__bb__/new-thread",
+        "__bb__/search-threads",
         "__bb__/extensions",
         "__bb__/skills",
         "docs/main",
@@ -1522,6 +1536,7 @@ describe("Navigation plugin in the sidebar navigation region", () => {
       renderNavigation({ storedOrder, storedVisibleKeys });
       expect(visibleRowKeys()).toEqual([
         "__bb__/new-thread",
+        "__bb__/search-threads",
         "__bb__/extensions",
         "__bb__/skills",
         "tasks/main",
