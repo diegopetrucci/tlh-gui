@@ -398,11 +398,12 @@ describe("SidebarNavigationRegion", () => {
 
     expect(listedItems("Visible items")).toEqual([
       "New thread",
+      "Search threads",
       "Plugins",
       "Skills",
       "Docs",
     ]);
-    expect(listedItems("Hidden items")).toEqual(["__bb__/search-threads"]);
+    expect(listedItems("Hidden items")).toEqual([]);
   });
 
   it("persists visibility and order changes through the actions", () => {
@@ -410,10 +411,7 @@ describe("SidebarNavigationRegion", () => {
     renderHarness();
 
     act(() => capturedActions.current?.setVisible("garden/docs", false));
-    expect(listedItems("Hidden items")).toEqual([
-      "__bb__/search-threads",
-      "garden/docs",
-    ]);
+    expect(listedItems("Hidden items")).toEqual(["garden/docs"]);
 
     act(() => capturedActions.current?.setVisible("garden/docs", true));
     act(() =>
@@ -427,6 +425,7 @@ describe("SidebarNavigationRegion", () => {
       "Docs",
       "Skills",
       "New thread",
+      "Search threads",
       "Plugins",
     ]);
   });

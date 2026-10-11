@@ -50,7 +50,8 @@ import { SIDEBAR_FOOTER_MORE_ID } from "./sidebarFooterPreferences";
 import { LazySidebarFooterCustomize } from "./LazySidebarFooterCustomize";
 import { SidebarHeaderSlot } from "./SidebarHeaderSlot";
 
-const BUG_REPORT_NEW_ISSUE_URL = "https://github.com/get-bb/bb/issues/new";
+const BUG_REPORT_NEW_ISSUE_URL =
+  "https://github.com/diegopetrucci/tlh-gui/issues/new";
 
 interface AppSidebarProps {
   onResizeMouseDown: (event: React.MouseEvent<HTMLDivElement>) => void;
