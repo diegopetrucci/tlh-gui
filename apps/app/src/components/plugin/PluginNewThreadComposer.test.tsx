@@ -877,7 +877,7 @@ describe("PluginNewThreadComposer seeding", () => {
       latestPromptBoxProps().modeConfig.environment.onSelectHost("host_2");
     });
     expect(latestPromptBoxProps().modeConfig.environment.value).toBe(
-      "provider:project-checkout",
+      "provider:git-worktree",
     );
     expect(
       latestPromptBoxProps().modeConfig.environment.selectedProviderHostId,
@@ -1317,7 +1317,7 @@ describe("PluginNewThreadComposer seeding", () => {
       permissionMode: "auto",
       environment: {
         type: "provider",
-        environmentProviderId: "project-checkout",
+        environmentProviderId: "git-worktree",
         inputs: {},
       },
     });
@@ -1472,7 +1472,7 @@ describe("PluginNewThreadComposer seeding", () => {
       expect(router.state.location.state).toBeNull();
     });
     expect(latestPromptBoxProps().modeConfig.environment.value).toBe(
-      "provider:project-checkout",
+      "provider:git-worktree",
     );
     const selectedIndex = mocks.promptBoxProps.findIndex(
       (props) =>

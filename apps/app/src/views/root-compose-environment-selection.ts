@@ -5,6 +5,7 @@ import {
 } from "@bb/domain";
 import type { SystemEnvironmentProvider } from "@bb/server-contract";
 import {
+  GIT_WORKTREE_ENVIRONMENT_PROVIDER_ID,
   PERSONAL_WORKSPACE_ENVIRONMENT_PROVIDER_ID,
   PROJECT_CHECKOUT_ENVIRONMENT_PROVIDER_ID,
 } from "@bb/client-core";
@@ -28,6 +29,7 @@ interface ResolveRootComposeEffectiveEnvironmentValueArgs {
   isProjectless: boolean;
   knownHostIds: ReadonlySet<string>;
   primaryHostId: string | null;
+  projectEnvironmentProviders?: readonly SystemEnvironmentProvider[];
   projectSources: readonly ProjectSource[];
   reuseThreadOptions: readonly ReuseThreadOption[];
   reuseThreadOptionsLoading: boolean;
@@ -232,6 +234,7 @@ export function resolveRootComposeEffectiveEnvironmentValue({
   isProjectless,
   knownHostIds,
   primaryHostId,
+  projectEnvironmentProviders,
   projectSources,
   reuseThreadOptions,
   reuseThreadOptionsLoading,
@@ -264,14 +267,28 @@ export function resolveRootComposeEffectiveEnvironmentValue({
           (provider) => provider.id === parsedSelection.environmentProviderId,
         )
       : undefined;
-  const fallbackValue =
+  const hasPrimaryHostSource =
     primaryHostId !== null &&
     knownHostIds.has(primaryHostId) &&
     findLocalPathProjectSourceForHost(projectSources, primaryHostId) !==
-      undefined &&
+      undefined;
+  const worktreeUsable =
+    hasPrimaryHostSource &&
+    providerRegistered(GIT_WORKTREE_ENVIRONMENT_PROVIDER_ID) &&
+    projectEnvironmentProviders?.find(
+      (provider) => provider.id === GIT_WORKTREE_ENVIRONMENT_PROVIDER_ID,
+    )?.machineAvailability[primaryHostId]?.status !== "unavailable";
+  const checkoutValue =
+    hasPrimaryHostSource &&
     providerRegistered(PROJECT_CHECKOUT_ENVIRONMENT_PROVIDER_ID)
       ? encodeProviderValue(PROJECT_CHECKOUT_ENVIRONMENT_PROVIDER_ID)
       : "";
+  const fallbackValue =
+    projectEnvironmentProviders === undefined
+      ? ""
+      : worktreeUsable
+        ? encodeProviderValue(GIT_WORKTREE_ENVIRONMENT_PROVIDER_ID)
+        : checkoutValue;
 
   if (parsedSelection?.type === "reuse") {
     if (parsedSelection.environmentId === null) {
