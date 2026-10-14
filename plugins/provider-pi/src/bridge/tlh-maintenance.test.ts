@@ -4,6 +4,8 @@ const mockState = vi.hoisted(() => ({
   command: "tlh",
   readFileResult: null as string | null | Error,
   execFileResult: null as string | null,
+  versionJsonResult: null as string | null,
+  execCalls: [] as string[][],
   resolvedExecutable: null as string | null,
   fetchResult: null as object | null | "error" | "timeout",
 }));
@@ -25,16 +27,22 @@ vi.mock("node:fs/promises", () => ({
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>();
   const { promisify } = await import("node:util");
-  const execFileCustom = vi.fn(async () => {
+  const execFileCustom = vi.fn(async (_command: string, args: string[]) => {
+    mockState.execCalls.push(args);
+    if (args.includes("--json")) {
+      if (mockState.versionJsonResult === null) {
+        throw Object.assign(new Error("Unknown option: --json"), { code: 1 });
+      }
+      return { stdout: mockState.versionJsonResult, stderr: "" };
+    }
     if (mockState.execFileResult === null) {
       throw Object.assign(new Error("spawn ENOENT"), { code: "ENOENT" });
     }
     return { stdout: mockState.execFileResult, stderr: "" };
   });
   const execFileMock = vi.fn();
-  (execFileMock as unknown as Record<symbol, unknown>)[
-    promisify.custom
-  ] = execFileCustom;
+  (execFileMock as unknown as Record<symbol, unknown>)[promisify.custom] =
+    execFileCustom;
   return { ...actual, execFile: execFileMock };
 });
 
@@ -91,6 +99,8 @@ afterEach(() => {
   mockState.command = "tlh";
   mockState.readFileResult = null;
   mockState.execFileResult = null;
+  mockState.versionJsonResult = null;
+  mockState.execCalls = [];
   mockState.resolvedExecutable = null;
   mockState.fetchResult = null;
   vi.restoreAllMocks();
@@ -139,7 +149,10 @@ describe("readTlhInstallState", () => {
   });
 
   it("returns null when required fields are missing", async () => {
-    mockState.readFileResult = JSON.stringify({ schemaVersion: 1, ref: "v0.10.0" });
+    mockState.readFileResult = JSON.stringify({
+      schemaVersion: 1,
+      ref: "v0.10.0",
+    });
     expect(await readTlhInstallState()).toBeNull();
   });
 
@@ -371,6 +384,115 @@ describe("getTlhInstallationStatus — non-release track", () => {
   });
 });
 
+function versionJson(overrides: Record<string, unknown> = {}): string {
+  return JSON.stringify({
+    schemaVersion: 1,
+    tlhVersion: "0.45.0",
+    piVersion: "1.2.0",
+    track: "latest-release",
+    ref: "v0.45.0",
+    repo: "diegopetrucci/the-last-harness",
+    agentDir: "/home/u/.the-last-harness/agent",
+    ...overrides,
+  });
+}
+
+describe("getTlhInstallationStatus — tlh version --json", () => {
+  beforeEach(() => {
+    mockState.resolvedExecutable = "/usr/local/bin/tlh";
+    mockState.readFileResult = validInstallState;
+    vi.stubGlobal("fetch", makeFetchMock({ tag_name: "v0.46.0" }));
+  });
+
+  it("uses tlhVersion and piVersion without calling --version", async () => {
+    mockState.versionJsonResult = versionJson();
+    mockState.execFileResult = "0.1.0\n";
+    const status = await getTlhInstallationStatus(true, "1.0.0");
+    expect(status).toMatchObject({
+      currentVersion: "0.45.0",
+      latestVersion: "0.46.0",
+      needsUpdate: true,
+      versionUnsupported: false,
+    });
+    expect(mockState.execCalls).toEqual([["version", "--json"]]);
+  });
+
+  it("flags unsupported when JSON piVersion is below the minimum", async () => {
+    mockState.versionJsonResult = versionJson({ piVersion: "0.83.0" });
+    const status = await getTlhInstallationStatus(false, "0.84.0");
+    expect(status.versionUnsupported).toBe(true);
+  });
+
+  it("falls back to install-state when the JSON probe exits non-zero", async () => {
+    mockState.versionJsonResult = null;
+    mockState.execFileResult = "0.84.0\n";
+    const status = await getTlhInstallationStatus(true, "0.84.0");
+    expect(status).toMatchObject({
+      currentVersion: "0.10.0",
+      latestVersion: "0.46.0",
+      needsUpdate: true,
+    });
+  });
+
+  it.each([
+    ["invalid JSON", "not json {"],
+    ["wrong schemaVersion", versionJson({ schemaVersion: 2 })],
+    ["missing repo", versionJson({ repo: undefined })],
+    ["non-string repo", versionJson({ repo: 42 })],
+  ])("falls back to install-state on %s", async (_name, stdout) => {
+    mockState.versionJsonResult = stdout;
+    mockState.execFileResult = "0.84.0\n";
+    const status = await getTlhInstallationStatus(false, "0.84.0");
+    expect(status.currentVersion).toBe("0.10.0");
+    expect(mockState.execCalls).toContainEqual(["--version"]);
+  });
+
+  it("probes --version for the minimum check when JSON piVersion is null", async () => {
+    mockState.versionJsonResult = versionJson({ piVersion: null });
+    mockState.execFileResult = "0.83.0\n";
+    const status = await getTlhInstallationStatus(false, "0.84.0");
+    expect(status).toMatchObject({
+      currentVersion: "0.45.0",
+      versionUnsupported: true,
+    });
+    expect(mockState.execCalls).toContainEqual(["--version"]);
+  });
+
+  it.each(["garbage", "1.2"])(
+    "falls back to --version when JSON piVersion %j is malformed",
+    async (piVersion) => {
+      mockState.versionJsonResult = versionJson({ piVersion });
+      mockState.execFileResult = "0.83.0\n";
+      const status = await getTlhInstallationStatus(false, "0.84.0");
+      expect(status).toMatchObject({ versionUnsupported: true });
+      expect(mockState.execCalls).toContainEqual(["--version"]);
+    },
+  );
+
+  it("shows currentVersion but never needsUpdate on a non-release track", async () => {
+    mockState.versionJsonResult = versionJson({ track: "main", ref: "main" });
+    const status = await getTlhInstallationStatus(true, "1.0.0");
+    expect(fetch).not.toHaveBeenCalled();
+    expect(status).toMatchObject({
+      currentVersion: "0.45.0",
+      latestVersion: null,
+      needsUpdate: false,
+    });
+  });
+
+  it("uses the JSON repo for the installer command and falls back for invalid repo", async () => {
+    const status = await getTlhInstallationStatus(false, "1.0.0");
+    mockState.versionJsonResult = versionJson({ repo: "myorg/json-repo" });
+    const run = await tlhInstallationRun(status, "install");
+    expect(run.command.displayCommand).toContain("myorg/json-repo");
+    mockState.versionJsonResult = versionJson({ repo: "nodash" });
+    const fallback = await tlhInstallationRun(status, "install");
+    expect(fallback.command.displayCommand).toContain(
+      "diegopetrucci/the-last-harness",
+    );
+  });
+});
+
 describe("tlhInstallationRun", () => {
   it("returns the TLH installer for install action", async () => {
     const status = {
@@ -383,7 +505,11 @@ describe("tlhInstallationRun", () => {
       npmPackageName: null,
       npmGlobalPackageVersion: null,
       minimumSupportedVersion: null,
-      installAction: { kind: "install" as const, label: "Install" as const, command: "" },
+      installAction: {
+        kind: "install" as const,
+        label: "Install" as const,
+        command: "",
+      },
       needsUpdate: false,
       versionUnsupported: false,
     };
@@ -406,7 +532,11 @@ describe("tlhInstallationRun", () => {
       npmPackageName: null,
       npmGlobalPackageVersion: null,
       minimumSupportedVersion: null,
-      installAction: { kind: "update" as const, label: "Update" as const, command: "" },
+      installAction: {
+        kind: "update" as const,
+        label: "Update" as const,
+        command: "",
+      },
       needsUpdate: true,
       versionUnsupported: false,
     };
@@ -429,7 +559,11 @@ describe("tlhInstallationRun", () => {
       npmPackageName: null,
       npmGlobalPackageVersion: null,
       minimumSupportedVersion: null,
-      installAction: { kind: "update" as const, label: "Update" as const, command: "" },
+      installAction: {
+        kind: "update" as const,
+        label: "Update" as const,
+        command: "",
+      },
       needsUpdate: false,
       versionUnsupported: true,
     };
@@ -449,7 +583,11 @@ describe("tlhInstallationRun", () => {
       npmPackageName: null,
       npmGlobalPackageVersion: null,
       minimumSupportedVersion: null,
-      installAction: { kind: "update" as const, label: "Update" as const, command: "" },
+      installAction: {
+        kind: "update" as const,
+        label: "Update" as const,
+        command: "",
+      },
       needsUpdate: false,
       versionUnsupported: true,
     };
@@ -522,11 +660,12 @@ describe("getTlhInstallationStatus — resolveExecutablePath uses launch command
     mockState.resolvedExecutable = "/abs/path/tlh";
     mockState.execFileResult = "0.84.0\n";
     mockState.readFileResult = null;
-    const { experimental_resolveExecutablePath } = await import(
-      "@get-bb/plugin-sdk/provider-bridge"
-    );
+    const { experimental_resolveExecutablePath } =
+      await import("@get-bb/plugin-sdk/provider-bridge");
     const status = await getTlhInstallationStatus(false, "0.84.0");
-    expect(experimental_resolveExecutablePath).toHaveBeenCalledWith("/abs/path/tlh");
+    expect(experimental_resolveExecutablePath).toHaveBeenCalledWith(
+      "/abs/path/tlh",
+    );
     expect(status.installed).toBe(true);
     expect(status.minimumSupportedVersion).toBeNull();
   });
@@ -597,17 +736,23 @@ describe("strict version parsing — install-state ref", () => {
 describe("strict version parsing — GitHub tag_name", () => {
   it("returns null when tag_name is 'main'", async () => {
     vi.stubGlobal("fetch", makeFetchMock({ tag_name: "main" }));
-    expect(await fetchTlhLatestRelease("diegopetrucci/the-last-harness")).toBeNull();
+    expect(
+      await fetchTlhLatestRelease("diegopetrucci/the-last-harness"),
+    ).toBeNull();
   });
 
   it("returns null when tag_name is 'feature/1.2.3'", async () => {
     vi.stubGlobal("fetch", makeFetchMock({ tag_name: "feature/1.2.3" }));
-    expect(await fetchTlhLatestRelease("diegopetrucci/the-last-harness")).toBeNull();
+    expect(
+      await fetchTlhLatestRelease("diegopetrucci/the-last-harness"),
+    ).toBeNull();
   });
 
   it("returns null when tag_name is an incomplete semver like 'v1.2'", async () => {
     vi.stubGlobal("fetch", makeFetchMock({ tag_name: "v1.2" }));
-    expect(await fetchTlhLatestRelease("diegopetrucci/the-last-harness")).toBeNull();
+    expect(
+      await fetchTlhLatestRelease("diegopetrucci/the-last-harness"),
+    ).toBeNull();
   });
 });
 
@@ -654,7 +799,11 @@ describe("installer repo — custom repo from install-state", () => {
       npmPackageName: null,
       npmGlobalPackageVersion: null,
       minimumSupportedVersion: null,
-      installAction: { kind: "install" as const, label: "Install" as const, command: "" },
+      installAction: {
+        kind: "install" as const,
+        label: "Install" as const,
+        command: "",
+      },
       needsUpdate: false,
       versionUnsupported: false,
     };
@@ -675,12 +824,18 @@ describe("installer repo — custom repo from install-state", () => {
       npmPackageName: null,
       npmGlobalPackageVersion: null,
       minimumSupportedVersion: null,
-      installAction: { kind: "install" as const, label: "Install" as const, command: "" },
+      installAction: {
+        kind: "install" as const,
+        label: "Install" as const,
+        command: "",
+      },
       needsUpdate: false,
       versionUnsupported: false,
     };
     const result = await tlhInstallationRun(status, "install");
-    expect(result.command.displayCommand).toContain("diegopetrucci/the-last-harness");
+    expect(result.command.displayCommand).toContain(
+      "diegopetrucci/the-last-harness",
+    );
     expect(result.command.displayCommand).toContain("install.sh");
   });
 });
@@ -728,17 +883,23 @@ describe("strictSemver — rejects invalid semver (via getTlhInstallationStatus 
 describe("strictSemver — rejects invalid semver (via fetchTlhLatestRelease)", () => {
   it("returns null for tag_name 'v1.2.3-..'", async () => {
     vi.stubGlobal("fetch", makeFetchMock({ tag_name: "v1.2.3-.." }));
-    expect(await fetchTlhLatestRelease("diegopetrucci/the-last-harness")).toBeNull();
+    expect(
+      await fetchTlhLatestRelease("diegopetrucci/the-last-harness"),
+    ).toBeNull();
   });
 
   it("returns null for tag_name '01.2.3'", async () => {
     vi.stubGlobal("fetch", makeFetchMock({ tag_name: "01.2.3" }));
-    expect(await fetchTlhLatestRelease("diegopetrucci/the-last-harness")).toBeNull();
+    expect(
+      await fetchTlhLatestRelease("diegopetrucci/the-last-harness"),
+    ).toBeNull();
   });
 
   it("returns null for tag_name '1.2.3-01'", async () => {
     vi.stubGlobal("fetch", makeFetchMock({ tag_name: "1.2.3-01" }));
-    expect(await fetchTlhLatestRelease("diegopetrucci/the-last-harness")).toBeNull();
+    expect(
+      await fetchTlhLatestRelease("diegopetrucci/the-last-harness"),
+    ).toBeNull();
   });
 });
 
