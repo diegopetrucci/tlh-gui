@@ -6,7 +6,13 @@ import {
   migrate,
   setAppKeybindingOverrides,
 } from "../src/index.js";
-import { dropPluginEnabledFollowsDefaultColumn } from "./helpers/rewind.js";
+import {
+  dropPluginEnabledFollowsDefaultColumn,
+  dropIdleLifecycleIndexes,
+  rewindThreadPruningWork,
+  dropMarketplaceSourceGitSubdirectoryColumn,
+  dropQueuedMessageEditHeldUntilColumn,
+} from "./helpers/rewind.js";
 
 const migrationTimestamp = 1790738477751;
 const directions = ["left", "right", "up", "down"] as const;
@@ -41,7 +47,11 @@ const custom: AppKeybindingOverrides = [
 function upgradeDatabase(overrides: AppKeybindingOverrides | undefined) {
   const db = createConnection(":memory:");
   migrate(db);
+  dropIdleLifecycleIndexes(db);
+  rewindThreadPruningWork(db);
   dropPluginEnabledFollowsDefaultColumn(db);
+  dropQueuedMessageEditHeldUntilColumn(db);
+  dropMarketplaceSourceGitSubdirectoryColumn(db);
   db.$client
     .prepare("DELETE FROM __drizzle_migrations WHERE created_at >= ?")
     .run(migrationTimestamp);

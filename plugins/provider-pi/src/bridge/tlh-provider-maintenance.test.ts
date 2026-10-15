@@ -25,6 +25,7 @@ vi.mock("@get-bb/plugin-sdk/provider-bridge", async (importOriginal) => {
 
 vi.mock("./rpc-child.js", () => ({
   resolvePiLaunch: () => ({ command: mockState.command, args: [] }),
+  resolvePiProcessLaunch: () => ({ command: mockState.command, args: [] }),
 }));
 
 import {
@@ -69,12 +70,16 @@ describe("non-tlh command keeps upstream npm behavior", () => {
 describe("piHealthResult loginCommand — mode-aware", () => {
   it("returns 'pi' when command is pi (non-tlh mode)", () => {
     mockState.command = "pi";
-    expect(piHealthResult("ready")).toMatchObject({ health: { loginCommand: "pi" } });
+    expect(piHealthResult("ready")).toMatchObject({
+      health: { loginCommand: "pi" },
+    });
   });
 
   it("returns 'tlh' when command is tlh (tlh mode)", () => {
     mockState.command = "tlh";
-    expect(piHealthResult("ready")).toMatchObject({ health: { loginCommand: "tlh" } });
+    expect(piHealthResult("ready")).toMatchObject({
+      health: { loginCommand: "tlh" },
+    });
   });
 });
 

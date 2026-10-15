@@ -56,6 +56,10 @@ npx bb-app@latest
 
 Then open `http://localhost:38886`.
 
+To control bb from outside bb with the `bb` CLI, open **Settings → General →
+Command line** and choose **Install**. See
+[The bb Command On PATH](./docs/configuration.md#the-bb-command-on-path).
+
 To run the newest automated build instead:
 
 ```bash
@@ -88,12 +92,18 @@ This build ships with telemetry disabled and no PostHog key, so nothing is sent
 by default. To opt in, set `BB_TELEMETRY=true` and supply your own
 `BB_POSTHOG_API_KEY`. When enabled, the following anonymous usage data is
 collected: app starts, thread creation counts, user message counts, and plugin
-installs. Identification is a random per-install id stored in your data dir —
-no user, host, project, workspace, or message content is ever attached. Plugin
-install events name only public plugins (bundled plugins and `bb-community`
-marketplace entries); installs from a local path, a private git or npm source,
-or a third-party marketplace report no name. Development/source runs never
-send. See
+installs. Each event carries the app version, how bb was installed (desktop,
+npm, or source checkout), and the OS release, CPU architecture, and Node
+version. Source checkouts report whether `origin` points to
+`github.com/get-bb/bb`, another repository, or is unavailable. Telemetry never
+includes Git commit hashes or remote URLs. Identification is a random
+per-install id stored in your data dir — no user, host, project, workspace, or
+message content is ever attached. Plugin install events name only public
+plugins (bundled plugins and `bb-community` marketplace entries); installs from
+a local path, a private git or npm source, or a third-party marketplace report
+no name. Development runs (`pnpm dev`, `pnpm start:worktree`) never send;
+source checkouts started with `pnpm start` follow the same opt-in rules as any
+other production run. See
 [`apps/server/src/services/system/telemetry.ts`](./apps/server/src/services/system/telemetry.ts).
 
 ## Development

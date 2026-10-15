@@ -26,7 +26,7 @@ import {
   tlhInstallGuidance,
   tlhInstallationRun,
 } from "./tlh-maintenance.js";
-import { resolvePiLaunch } from "./rpc-child.js";
+import { resolvePiLaunch, resolvePiProcessLaunch } from "./rpc-child.js";
 
 const execFileAsync = promisify(execFile);
 export const PI_MINIMUM_SUPPORTED_VERSION = "0.84.0";
@@ -137,7 +137,7 @@ async function piGlobalInstallCommand(
 }
 
 export async function probePiVersion(): Promise<PiVersionProbe> {
-  const launch = resolvePiLaunch(process.env);
+  const launch = resolvePiProcessLaunch(process.env);
   const display = formatCommand(launch.command, [...launch.args, "--version"]);
   let stdout: string;
   try {
