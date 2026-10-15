@@ -122,7 +122,7 @@ export const BUILTIN_PLUGINS = [
   {
     name: "provider-claude-code",
     pluginId: "provider-claude-code",
-    defaultEnabled: true,
+    defaultEnabled: false,
   },
   {
     name: "provider-usage",
