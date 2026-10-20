@@ -2504,6 +2504,38 @@ describe("events", () => {
     ).toEqual([]);
   });
 
+  it("ignores legacy goal rows when looking up a non-goal state kind", () => {
+    const { db, thread } = setup();
+    insertEvents(db, noopNotifier, [
+      {
+        threadId: thread.id,
+        sequence: 1,
+        type: "thread/extensionState/updated",
+        ...threadEventFields,
+        providerThreadId: "provider-thread-1",
+        data: JSON.stringify({
+          kind: "provider-pi/status",
+          payload: { fast: true, usage: null },
+        }),
+      },
+      {
+        threadId: thread.id,
+        sequence: 2,
+        type: "thread/goal/cleared",
+        ...threadEventFields,
+        providerThreadId: "provider-thread-1",
+        data: JSON.stringify({}),
+      },
+    ]);
+
+    const rows = listLatestThreadStateEventRowsByThreadIds(db, {
+      threadIds: [thread.id],
+      kind: "provider-pi/status",
+    });
+
+    expect(rows.map((row) => row.sequence)).toEqual([1]);
+  });
+
   it("batches latest goal lookups above the SQLite variable limit", () => {
     const { db, project, thread } = setup();
     const finalBatchThread = createThread(db, noopNotifier, {

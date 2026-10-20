@@ -31,6 +31,7 @@ import {
   threadStatusSchema,
   threadTimelineActivePromptModeSchema,
   threadTimelineGoalSchema,
+  threadTimelineTlhStatusSchema,
   threadTimelineModelFallbackSchema,
   threadTimelinePendingTodosSchema,
   threadEventTypeValues,
@@ -1167,6 +1168,7 @@ export const threadTimelineResponseSchema = z.object({
     .array(providerCommandSchema.omit({ pluginId: true }))
     .nullable(),
   sessionOptions: z.array(threadTimelineSessionOptionSchema).nullable(),
+  tlhStatus: threadTimelineTlhStatusSchema.nullable(),
   modelFallback: threadTimelineModelFallbackSchema.nullable(),
   contextWindowUsage: threadContextWindowUsageSchema.optional(),
   timelinePage: timelinePageMetadataSchema,

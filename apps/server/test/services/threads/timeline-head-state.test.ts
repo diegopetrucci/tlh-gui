@@ -105,6 +105,21 @@ function seedThreadWithEarlyHeadState(
       events.push({
         threadId: thread.id,
         sequence: (sequence += 1),
+        type: "thread/extensionState/updated",
+        scope: threadScope(),
+        itemId: null,
+        itemKind: null,
+        parentToolCallId: null,
+        data: JSON.stringify({
+          threadId: thread.id,
+          providerThreadId,
+          kind: "provider-pi/status",
+          payload: { fast: true, usage: "5h 10%" },
+        }),
+      });
+      events.push({
+        threadId: thread.id,
+        sequence: (sequence += 1),
         type: "thread/goal/updated",
         scope: threadScope(),
         itemId: null,
@@ -253,6 +268,9 @@ describe("timeline head state under a budgeted window", () => {
 
     expect(unbudgeted.goal).not.toBeNull();
     expect(budgeted.goal).toEqual(unbudgeted.goal);
+
+    expect(unbudgeted.tlhStatus).toEqual({ fast: true, usage: "5h 10%" });
+    expect(budgeted.tlhStatus).toEqual(unbudgeted.tlhStatus);
 
     expect(unbudgeted.activeWorkflows).toHaveLength(1);
     expect(budgeted.activeWorkflows).toHaveLength(1);

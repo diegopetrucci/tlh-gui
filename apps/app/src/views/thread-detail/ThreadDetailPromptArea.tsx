@@ -197,6 +197,7 @@ interface ThreadDetailPromptAreaProps {
   canRestoreEnvironment: boolean;
   canUseGitUi: boolean;
   contextWindowUsage?: ThreadTimelineResponse["contextWindowUsage"];
+  tlhStatus?: ThreadTimelineResponse["tlhStatus"];
   environmentCheckout?: WorkspaceCheckoutDisplay;
   environmentCompactLabel?: string;
   environmentGoneStatus: "destroyed" | MachineRemovalStatus | null;
@@ -413,6 +414,7 @@ export function ThreadDetailPromptArea({
   canRestoreEnvironment,
   canUseGitUi,
   contextWindowUsage,
+  tlhStatus,
   environmentCheckout,
   environmentCompactLabel,
   environmentGoneStatus,
@@ -2403,6 +2405,7 @@ export function ThreadDetailPromptArea({
       environmentSummary={environmentSummary}
       compactEnvironmentSummary={compactEnvironmentSummary}
       contextWindowUsage={contextWindowUsage ?? null}
+      tlhStatus={tlhStatus ?? null}
       execution={bottomExecutionConfig}
       permission={bottomPermissionConfig}
       sessionOptionsControl={sessionOptionsControl}

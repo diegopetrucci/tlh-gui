@@ -795,6 +795,7 @@ function ThreadDetailViewInternal(
     goal,
     providerCommands,
     sessionOptions,
+    tlhStatus,
     hasOlderTimelineRows,
     isCatchingUpTimeline,
     isLoadingOlderTimelineRows,
@@ -2395,6 +2396,7 @@ function ThreadDetailViewInternal(
       activeBackgroundAgentCount={thread.activeBackgroundAgentCount}
       canUseGitUi={canUseGitUi}
       contextWindowUsage={contextWindowUsage}
+      tlhStatus={tlhStatus}
       environmentCheckout={threadCheckoutDisplay}
       environmentCompactLabel={
         composerEnvironmentChrome?.environmentCompactLabel

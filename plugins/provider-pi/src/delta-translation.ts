@@ -23,6 +23,10 @@ import {
   type ThreadDelta,
   type ThreadEventTokenUsageBreakdown,
 } from "@get-bb/plugin-sdk/provider-bridge";
+import {
+  PI_STATUS_EXTENSION_KIND,
+  piStatusUpdatedEnvelopeSchema,
+} from "./extension-kinds.js";
 import { toCanonicalPiModelId } from "./model-list.js";
 import { piVisibilityMetadata } from "./visibility.js";
 import { runSettlementError } from "./bridge/run-settlement.js";
@@ -613,6 +617,17 @@ export function createPiDeltaTranslator(
           size: toPositiveNumber(size) ?? null,
           estimated: contextWindowUsage.estimated,
           attach: "currentOrLast",
+        },
+      ];
+    }
+
+    const statusEnvelope = piStatusUpdatedEnvelopeSchema.safeParse(event);
+    if (statusEnvelope.success) {
+      return [
+        {
+          kind: "extension.state",
+          extensionKind: PI_STATUS_EXTENSION_KIND,
+          payload: statusEnvelope.data.params.status,
         },
       ];
     }

@@ -470,6 +470,15 @@ async function runPrompt(text) {
       "setTitle",
       "set_editor_text",
     ].includes(spec.method);
+    if (spec.method === "setStatus") {
+      send({
+        type: "extension_ui_request",
+        id: uiId,
+        method: "setStatus",
+        statusKey: spec.statusKey,
+        statusText: spec.statusText,
+      });
+    }
     const response = fireAndForget
       ? null
       : await new Promise((resolve) => {

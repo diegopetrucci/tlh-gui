@@ -54,6 +54,10 @@ interface PiThreadContextWindowUsageRawEvent {
   kind: "thread/contextWindowUsage/updated";
 }
 
+interface PiThreadTlhStatusRawEvent {
+  kind: "thread/tlhStatus/updated";
+}
+
 interface PiErrorRawEvent {
   kind: "error";
 }
@@ -104,6 +108,7 @@ type PiRawEvent =
   | PiNonSdkRawEvent
   | PiSimpleSdkRawEvent
   | PiThreadContextWindowUsageRawEvent
+  | PiThreadTlhStatusRawEvent
   | PiThreadIdentityRawEvent
   | PiToolExecutionStartRawEvent
   | PiUnknownSdkRawEvent;
@@ -198,6 +203,10 @@ function parsePiRawEvent(event: JsonRpcMessage): PiRawEvent {
     return { kind: "thread/contextWindowUsage/updated" };
   }
 
+  if (event.method === "thread/tlhStatus/updated") {
+    return { kind: "thread/tlhStatus/updated" };
+  }
+
   if (event.method === "error") {
     return { kind: "error" };
   }
@@ -288,6 +297,9 @@ function describeParsedPiRawEvent(
         kind: "thread/contextWindowUsage/updated",
         coverage: "normalized",
       };
+
+    case "thread/tlhStatus/updated":
+      return { kind: "thread/tlhStatus/updated", coverage: "normalized" };
 
     case "error":
       return { kind: "error", coverage: "normalized" };

@@ -20,12 +20,35 @@ What lives here:
   `extension_ui_request` lines, the bridge forwards each dialog as a
   `provider-pi/extension-ui` interaction request, and the plugin's pending
   interaction renderer (`app.tsx`) shows it and returns the answer to pi.
-  Fire-and-forget requests (`notify`, `setStatus`, `setWidget`, `setTitle`,
-  `set_editor_text`) are accepted and dropped. A dialog left pending when the
+  Fire-and-forget requests (`notify`, `setWidget`, `setTitle`,
+  `set_editor_text`, and `setStatus` other than the keys below) are accepted
+  and dropped. A dialog left pending when the
   session closes is answered cancelled. Requests that fail validation are
   answered cancelled, never forwarded. Select answers must match an offered
   option. Helper sessions without a dialog handler automatically cancel dialogs
   so extensions cannot block helper startup waiting for user input.
+
+## Status line (`provider-pi/status`)
+
+The bridge forwards two Pi `setStatus` keys as the extension state kind
+`provider-pi/status` (`src/extension-kinds.ts`), payload `{ fast, usage }`:
+
+- `fast`: boolean, true while the `fast` status key is set.
+- `usage`: preformatted single-line text from the `tlh-usage` key (control
+  characters stripped, capped at 200 characters), or `null`.
+
+State resets to `{ fast: false, usage: null }` when a session is constructed.
+The contract: TLH publishes preformatted usage text with
+`ctx.ui.setStatus("tlh-usage", text)` in RPC mode. That TLH-side change is not
+yet implemented, so `usage` stays `null` until it ships.
+
+The state is exposed as the `tlhStatus` field of the server thread timeline
+response (`GET /api/v1/threads/:id/timeline`) and the SDK's
+`bb.sdk.threads.timeline(...)`, and the app shows it as a second muted line
+under the follow-up composer. The `bb` CLI does not print `tlhStatus`: `bb
+thread log` renders only timeline rows, and its `--json` output returns the raw
+thread events, where the `thread/extensionState/updated` events with kind
+`provider-pi/status` carry the state.
 
 ## Skills
 

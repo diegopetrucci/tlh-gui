@@ -236,3 +236,38 @@ it("drops fire-and-forget extension ui requests without a runtime round trip", a
     ),
   ).toBe(false);
 }, 90_000);
+
+it("emits provider-pi/status extension state for fast and tlh-usage only when it changes", async () => {
+  const threadId = "thr_ui_status";
+  const providerThreadId = await startThread(threadId);
+  const statuses = (): unknown[] =>
+    harness
+      .deltasOf(threadId)
+      .filter(
+        (delta) =>
+          delta.kind === "extension.state" &&
+          delta.extensionKind === "provider-pi/status",
+      )
+      .map((delta) => delta.payload);
+  let cursor = 0;
+  const send = async (spec: Record<string, unknown>): Promise<void> => {
+    turnStart(
+      threadId,
+      providerThreadId,
+      `/ui ${JSON.stringify({ method: "setStatus", ...spec })}`,
+    );
+    cursor = await harness.waitForTurnBoundary(threadId, cursor);
+  };
+  expect(statuses()).toEqual([{ fast: false, usage: null }]);
+  await send({ statusKey: "fast", statusText: "fast" });
+  await send({ statusKey: "fast", statusText: "fast" });
+  await send({ statusKey: "unrelated", statusText: "hello" });
+  await send({ statusKey: "tlh-usage", statusText: " 5h 12% used " });
+  await send({ statusKey: "fast" });
+  expect(statuses()).toEqual([
+    { fast: false, usage: null },
+    { fast: true, usage: null },
+    { fast: true, usage: "5h 12% used" },
+    { fast: false, usage: "5h 12% used" },
+  ]);
+}, 90_000);
