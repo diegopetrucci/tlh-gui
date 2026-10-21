@@ -44,6 +44,7 @@ export function makeThreadTimelineResponse(
     goal: null,
     providerCommands: null,
     sessionOptions: null,
+    tlhStatus: null,
     modelFallback: null,
     maxSeq: 0,
     timelinePage: {

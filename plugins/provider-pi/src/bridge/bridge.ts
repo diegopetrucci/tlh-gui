@@ -42,6 +42,12 @@ import {
 import type { ImageContent } from "@earendil-works/pi-ai";
 import { createPiDeltaTranslator } from "../delta-translation.js";
 import {
+  applyPiStatusRequest,
+  INITIAL_PI_STATUS,
+  PI_TLH_STATUS_UPDATED_METHOD,
+  type PiStatusState,
+} from "../extension-kinds.js";
+import {
   buildPiSessionParams,
   buildPiTurnOptions,
   type PiSessionParams,
@@ -197,6 +203,8 @@ interface ThreadSession {
   cwd: string;
   construction: PiSessionParams;
   constructionModel: { provider: string; id: string } | undefined;
+  status: PiStatusState;
+  statusPublished: boolean;
 }
 
 let sessionSerialCounter = 0;
@@ -433,6 +441,19 @@ function createOnExtensionUiRequest(
   return (request) => {
     const threadSession = getCurrentThreadSession(args);
     if (!threadSession || threadSession.closing) return;
+    const nextStatus = applyPiStatusRequest(
+      threadSession.status,
+      request,
+      threadSession.statusPublished,
+    );
+    if (nextStatus) {
+      threadSession.status = nextStatus;
+      threadSession.statusPublished = true;
+      emitForSession(args.threadId, PI_TLH_STATUS_UPDATED_METHOD, {
+        threadId: args.threadId,
+        status: nextStatus,
+      });
+    }
     extensionUi.handle({
       scope: threadSession,
       request,
@@ -767,6 +788,8 @@ async function constructPiThreadSession(
     cwd: params.cwd,
     construction: params,
     constructionModel: sessionOptions.model,
+    status: INITIAL_PI_STATUS,
+    statusPublished: false,
   };
   sessions.set(threadId, threadSession);
   try {

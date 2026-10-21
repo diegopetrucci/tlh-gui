@@ -20,6 +20,7 @@ import type {
   PromptTextMention,
   ThreadRuntimeDisplayStatus,
   ThreadTimelineActivePromptMode,
+  ThreadTimelineTlhStatus,
 } from "@bb/domain";
 import type { ComposerView, PluginComposerScope } from "@get-bb/plugin-sdk";
 import type { ComposerTextEffectSource } from "@/lib/composer-text-effects";
@@ -154,6 +155,7 @@ export interface FollowUpPromptBoxProps {
   environmentSummary: ReactNode | null;
   compactEnvironmentSummary?: ReactNode;
   contextWindowUsage: ContextWindowUsage | null;
+  tlhStatus?: ThreadTimelineTlhStatus | null;
   execution: ExecutionControlsProps;
   permission: ExecutionPermissionConfig;
   sessionOptionsControl?: ReactNode;
@@ -232,6 +234,7 @@ function FollowUpPromptBoxWithComposer({
   environmentSummary,
   compactEnvironmentSummary = null,
   contextWindowUsage,
+  tlhStatus = null,
   execution,
   permission,
   sessionOptionsControl = null,
@@ -692,6 +695,12 @@ function FollowUpPromptBoxWithComposer({
           FOLLOW_UP_PROMPT_BOX_ELASTIC_TARGET_HEIGHT - stackHeight,
         );
 
+  const tlhStatusText = tlhStatus
+    ? [tlhStatus.fast ? "fast" : null, tlhStatus.usage]
+        .filter((segment): segment is string => Boolean(segment))
+        .join(" • ")
+    : "";
+
   const composerElement = (
     <div
       ref={composerInteractionRef}
@@ -814,6 +823,14 @@ function FollowUpPromptBoxWithComposer({
               <ThreadContextWindowIndicator usage={contextWindowUsage} />
             ) : null}
           </div>
+        </div>
+      ) : null}
+      {!isPromptBoxCompact && tlhStatusText ? (
+        <div
+          data-follow-up-composer-tlh-status=""
+          className="truncate whitespace-nowrap pl-[15px] pr-3.5 text-xs text-muted-foreground"
+        >
+          {tlhStatusText}
         </div>
       ) : null}
     </div>

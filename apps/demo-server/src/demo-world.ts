@@ -548,6 +548,7 @@ export class DemoWorld {
       goal: null,
       providerCommands: null,
       sessionOptions: null,
+      tlhStatus: null,
       modelFallback: null,
       contextWindowUsage: {
         estimated: false,

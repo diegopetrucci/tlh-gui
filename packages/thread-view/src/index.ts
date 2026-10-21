@@ -57,6 +57,7 @@ export {
   extractThreadProviderCommands,
   extractThreadSessionOptions,
 } from "./provider-state-extraction.js";
+export { extractThreadTimelineTlhStatus } from "./tlh-status-extraction.js";
 export type { AcceptedClientRequestContext } from "./accepted-client-request-context.js";
 export {
   buildTimelineViewRows,

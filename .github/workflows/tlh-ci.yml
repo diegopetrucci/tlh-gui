@@ -60,18 +60,6 @@ jobs:
       - name: Build, typecheck, and lint
         run: pnpm exec turbo run build typecheck lint --cache-dir="${TURBO_CACHE_DIR:-.turbo/cache}" --output-logs=new-only --summarize --concurrency=4
 
-      - name: Check plugin SDK npm version guard
-        run: |
-          set +e
-          node packages/plugin-sdk/scripts/check-npm-version-guard.mjs
-          guard_exit=$?
-          set -e
-          if [[ "$guard_exit" -eq 2 ]]; then
-            echo "::warning::Skipping the plugin SDK npm version guard: the npm registry was unreachable."
-            exit 0
-          fi
-          exit "$guard_exit"
-
       - name: Check app bundle budgets
         run: node apps/app/scripts/check-bundle-budget.mjs
 

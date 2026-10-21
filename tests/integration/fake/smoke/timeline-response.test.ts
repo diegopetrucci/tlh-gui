@@ -55,6 +55,7 @@ function makeTimelineResponse(
     activeBackgroundCommands: [],
     pendingTodos: null,
     goal: null,
+    tlhStatus: null,
     providerCommands: null,
     sessionOptions: null,
     modelFallback: null,
