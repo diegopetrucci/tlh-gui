@@ -123,6 +123,7 @@ function makeTimelineResponse(
     goal: null,
     providerCommands: null,
     sessionOptions: null,
+    tlhStatus: null,
     modelFallback: null,
     maxSeq,
     timelinePage: {

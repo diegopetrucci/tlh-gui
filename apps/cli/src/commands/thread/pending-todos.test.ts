@@ -115,6 +115,7 @@ describe("fetchThreadPendingTodos", () => {
       goal: null,
       providerCommands: null,
       sessionOptions: null,
+      tlhStatus: null,
       modelFallback: null,
       rows: [],
       maxSeq: 0,

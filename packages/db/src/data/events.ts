@@ -41,6 +41,7 @@ import {
   LOCAL_WORKFLOW_TASK_TYPE,
   THREAD_CONTEXT_CLEAR_OPERATION,
   clientTurnRequestIdSchema,
+  LEGACY_CODEX_GOAL_EXTENSION_KIND,
   getThreadEventScopeTurnId,
   parseStoredThreadEvent,
   systemThreadInterruptedReasonSchema,
@@ -1453,9 +1454,15 @@ export function listLatestThreadStateEventRowsByThreadIds(
       const stateTypesPredicate = sql.raw(
         `IN (${stateTypes.map((type) => `'${type}'`).join(", ")})`,
       );
-      const kindPredicate = sql`(
+      const kindPredicate =
+        args.kind === LEGACY_CODEX_GOAL_EXTENSION_KIND
+          ? sql`(
         candidate.type <> 'thread/extensionState/updated'
         OR json_extract(candidate.data, '$.kind') = ${args.kind}
+      )`
+          : sql`(
+        candidate.type = 'thread/extensionState/updated'
+        AND json_extract(candidate.data, '$.kind') = ${args.kind}
       )`;
       const requestedThreads = sql.join(
         threadIds.map((threadId) => sql`(${threadId})`),

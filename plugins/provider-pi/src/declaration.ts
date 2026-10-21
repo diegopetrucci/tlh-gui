@@ -1,4 +1,5 @@
 import type { PluginProviderDeclaration } from "@get-bb/plugin-sdk";
+import { piExtensionKinds } from "./extension-kinds.js";
 import { PI_NATIVE_ROOTS_DECLARATION } from "./native-roots.js";
 
 export function piProviderDeclaration(): PluginProviderDeclaration {
@@ -34,5 +35,6 @@ export function piProviderDeclaration(): PluginProviderDeclaration {
     ],
     ...PI_NATIVE_ROOTS_DECLARATION,
     composerActions: [],
+    extensionKinds: piExtensionKinds,
   };
 }

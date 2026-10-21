@@ -36,6 +36,7 @@ import {
   THREAD_PROVIDER_COMMANDS_STATE_KIND,
   THREAD_SESSION_OPTIONS_STATE_KIND,
   THREAD_SESSION_OPTION_SELECTIONS_STATE_KIND,
+  TLH_STATUS_EXTENSION_KIND,
 } from "@bb/domain";
 import { sliceUtf16Head } from "@bb/text-utils";
 import type {
@@ -937,6 +938,10 @@ function listLatestTimelineHeadStateRows(
       threadIds: [threadId],
       kind: THREAD_SESSION_OPTION_SELECTIONS_STATE_KIND,
     }),
+    ...listLatestThreadStateEventRowsByThreadIds(db, {
+      threadIds: [threadId],
+      kind: TLH_STATUS_EXTENSION_KIND,
+    }),
     ...listTodoSnapshotEventRowsForThread(db, { threadId }),
   ]);
 }
@@ -1509,6 +1514,7 @@ function buildThreadTimelineInternal(
     goal: timeline.goal,
     providerCommands: timeline.providerCommands,
     sessionOptions: timeline.sessionOptions,
+    tlhStatus: timeline.tlhStatus,
     modelFallback:
       options.page.kind === "latest" ? timeline.modelFallback : null,
     contextWindowUsage:

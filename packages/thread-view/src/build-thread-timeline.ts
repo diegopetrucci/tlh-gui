@@ -24,6 +24,7 @@ import {
   type ThreadEventItemPresentation,
   type ThreadTimelineActivePromptMode,
   type ThreadTimelineGoal,
+  type ThreadTimelineTlhStatus,
   type ThreadTimelineModelFallback,
   type ThreadTimelinePendingTodos,
 } from "@bb/domain";
@@ -69,6 +70,7 @@ import {
   extractThreadProviderCommands,
   extractThreadSessionOptions,
 } from "./provider-state-extraction.js";
+import { extractThreadTimelineTlhStatus } from "./tlh-status-extraction.js";
 import { extractThreadTimelineModelFallback } from "./model-fallback-extraction.js";
 import { extractThreadTimelinePendingTodos } from "./todo-snapshot-extraction.js";
 import { buildTimelineErrorDisplay } from "./error-display.js";
@@ -104,6 +106,7 @@ export interface ThreadTimelineFromEventsResult {
   activeBackgroundCommands: TimelineWorkflowWorkRow[];
   contextWindowUsage: ThreadContextWindowUsage | null;
   goal: ThreadTimelineGoal | null;
+  tlhStatus: ThreadTimelineTlhStatus | null;
   modelFallback: ThreadTimelineModelFallback | null;
   pendingTodos: ThreadTimelinePendingTodos | null;
   providerCommands: ProviderCommand[] | null;
@@ -1218,6 +1221,9 @@ export function buildThreadTimelineFromEvents(
     sessionOptions: !args.options.isLatestPage
       ? null
       : extractThreadSessionOptions(stateEvents),
+    tlhStatus: !args.options.isLatestPage
+      ? null
+      : extractThreadTimelineTlhStatus(stateEvents),
     modelFallback: !args.options.isLatestPage
       ? null
       : extractThreadTimelineModelFallback(args.events),

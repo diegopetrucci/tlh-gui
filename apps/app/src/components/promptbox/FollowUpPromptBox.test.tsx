@@ -1483,6 +1483,33 @@ describe("FollowUpPromptBox", () => {
     );
   });
 
+  it.each([
+    [{ fast: true, usage: "5h 12%" }, "fast • 5h 12%"],
+    [{ fast: true, usage: null }, "fast"],
+    [{ fast: false, usage: "5h 12%" }, "5h 12%"],
+  ])("renders the TLH status line for %j", (tlhStatus, expected) => {
+    const props = createFollowUpPromptBoxProps({ kind: "ready" });
+    props.tlhStatus = tlhStatus;
+    render(<FollowUpPromptBox {...props} />);
+
+    const line = document.querySelector("[data-follow-up-composer-tlh-status]");
+    expect(line?.textContent).toBe(expected);
+    expect(line?.classList.contains("truncate")).toBe(true);
+  });
+
+  it.each([null, { fast: false, usage: null }])(
+    "omits the TLH status line for %j",
+    (tlhStatus) => {
+      const props = createFollowUpPromptBoxProps({ kind: "ready" });
+      props.tlhStatus = tlhStatus;
+      render(<FollowUpPromptBox {...props} />);
+
+      expect(
+        document.querySelector("[data-follow-up-composer-tlh-status]"),
+      ).toBeNull();
+    },
+  );
+
   it.each(["recording", "transcribing"] as const)(
     "keeps the status footer while the prompt box handles voice controls during %s",
     (state) => {
