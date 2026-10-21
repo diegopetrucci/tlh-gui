@@ -281,8 +281,8 @@ After a move, bb on the old computer refuses to start the old server and runs as
 a regular machine. `bb server delete-old-copy` deletes the server files left
 behind and keeps that lock. The desktop app installs the persistent machine
 service itself; after a move from `bb-app`, or to retry, run
-`bb server install-machine-service` (macOS and Linux; needs Node.js 22.19 or
-newer on the PATH). `bb server unlock` is a last resort: everything since the
+`bb server install-machine-service` (macOS and Linux; needs Node.js 22.23.4+, 24.22.1+, or 26.12.1+
+on the PATH). `bb server unlock` is a last resort: everything since the
 move is lost on that copy, it refuses while the new server still answers unless
 `--force` is passed, and it refuses while the machine service is installed.
 `unlock`, `delete-old-copy`, `allow-connect`, and `install-machine-service`
@@ -335,7 +335,7 @@ default access provider. `--no-wait` returns the creating host ID.
 
 On Windows, the command installs under
 `%USERPROFILE%\.bb-machines\<server-host>`, starts the daemon at sign-in, and
-needs Node.js 22.19 or newer on PATH. Manage it with
+needs Node.js 22.23.4+, 24.22.1+, or 26.12.1+ on PATH. Manage it with
 `node <machine-dir>\install-machine-windows.mjs --stop|--start|--uninstall --host-id <id>`.
 
 Use `bb machine show <host-id>` to recover progress and

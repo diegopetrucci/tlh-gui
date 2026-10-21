@@ -57,7 +57,7 @@ catalog consistency, and index coverage without starting BB.
 
 ## Launch
 
-Use Node 22.19 or newer in the Node 22 line; `.nvmrc` supplies the primary
+Use Node 22.23.4 or newer in the Node 22 line; `.nvmrc` supplies the primary
 version. The initial run passed on Node 22.23.2. Node 24.18.0 crashed during
 native-module setup on that run. Keep the chosen Node on PATH for launch,
 source CLI calls, and cleanup. Do not bypass native-module repair or rebuild

@@ -230,7 +230,7 @@ describe("bb server install-machine-service", () => {
     ).rejects.toThrow("process.exit:1");
 
     expect(collectLogPayloads(vi.mocked(console.error))).toEqual([
-      "Error: The background service runs bb with the node on your PATH, which is Node.js 20.18.1. Install Node.js 22.19 or newer, then run this command again.",
+      "Error: The background service runs bb with the node on your PATH, which is Node.js 20.18.1. Install Node.js 22.23.4+, 24.22.1+, or 26.12.1+, then run this command again.",
     ]);
     expect(bb.exitCode).toBeNull();
     expect(bb.signalCode).toBeNull();

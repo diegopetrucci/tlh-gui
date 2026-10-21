@@ -33,7 +33,7 @@ const MOVE: DesktopServerMove = {
 const FAKE_INSTALLER = `#!/bin/sh
 printf 'args %s\\n' "$*"
 if [ "\${FAKE_INSTALLER_FAIL:-}" = 1 ]; then
-  printf '  %s  %s\\n' '✗' 'Node.js 20.18.1 is too old; bb-app requires Node.js 22.19 or newer.' >&2
+  printf '  %s  %s\\n' '✗' 'Node.js 20.18.1 is too old; bb-app requires Node.js 22.23.4+, 24.22.1+, or 26.12.1+.' >&2
   exit 1
 fi
 printf '  %s  %s\\n' '●' 'bb machine is ready'
@@ -124,7 +124,7 @@ posixDescribe("runMachineInstaller", () => {
     ).resolves.toEqual({
       ok: false,
       reason:
-        "Node.js 20.18.1 is too old; bb-app requires Node.js 22.19 or newer.",
+        "Node.js 20.18.1 is too old; bb-app requires Node.js 22.23.4+, 24.22.1+, or 26.12.1+.",
     });
   });
 

@@ -340,8 +340,8 @@ the checkout-specific URLs, data directory, and logs directory. Stop it with
 Ctrl-C. For desktop-only changes, start
 `pnpm exec turbo run dev --filter=@bb/desktop` in a second terminal.
 
-Use the Node version in `.nvmrc` (22.19.0). Desktop development requires
-Node 22.19 or newer in the Node 22 release line.
+Use the Node version in `.nvmrc` (22.23.4). Desktop development requires
+Node 22.23.4 or newer in the Node 22 release line.
 
 A bb connect shared-port URL is a different browser origin from localhost. If
 QA through that URL needs the browser-local host daemon, restart the dev app

@@ -26,7 +26,7 @@ bb runs from npm and orchestrates coding agents you already have installed.
 
 ### Prerequisites
 
-- Node.js 22.19, 24, or 26.
+- Node.js 22.23.4+, 24.22.1+, or 26.12.1+.
 - Git.
 - At least one supported agent provider: [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://developers.openai.com/codex/cli), Cursor via ACP, [Pi](https://github.com/earendil-works/pi/tree/main/packages/coding-agent), or another ACP-compatible agent.
 

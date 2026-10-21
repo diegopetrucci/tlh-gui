@@ -391,20 +391,20 @@ case "$(uname -s)" in
 esac
 
 if ! command -v node >/dev/null 2>&1; then
-  fail_step "bb-app requires Node.js 22.19 or newer (22.19, 24, and 26 are tested), but node is not on PATH."
+  fail_step "bb-app requires Node.js 22.23.4+, 24.22.1+, or 26.12.1+, but node is not on PATH."
   exit 1
 fi
 node_version=$(node -p 'process.versions.node')
-# Open-ended floor rather than an allow-list of tested majors: Pi only requires
-# >=22.19, and a closed list turns every future release line into a hard
-# install failure on the day it ships.
 node_supported=$(node -e '
-  const [major, minor] = process.versions.node.split(".").map(Number);
-  const supported = major > 22 || (major === 22 && minor >= 19);
+  const [major, minor, patch] = process.versions.node.split(".").map(Number);
+  const supported = major > 26 ||
+    (major === 22 && (minor > 23 || (minor === 23 && patch >= 4))) ||
+    (major === 24 && (minor > 22 || (minor === 22 && patch >= 1))) ||
+    (major === 26 && (minor > 12 || (minor === 12 && patch >= 1)));
   process.exit(supported ? 0 : 1);
 ' && echo yes || echo no)
 if [ "$node_supported" != yes ]; then
-  fail_step "Node.js $node_version is too old; bb-app requires Node.js 22.19 or newer (22.19, 24, and 26 are tested)."
+  fail_step "Node.js $node_version is too old; bb-app requires Node.js 22.23.4+, 24.22.1+, or 26.12.1+."
   exit 1
 fi
 node_bin=$(command -v node)

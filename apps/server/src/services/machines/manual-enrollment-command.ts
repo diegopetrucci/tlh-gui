@@ -39,7 +39,7 @@ export function enrolledWindowsInstallerScript(
   return [
     "$ErrorActionPreference = 'Stop'",
     "$bbNode = Get-Command node.exe -ErrorAction SilentlyContinue",
-    "if ($null -eq $bbNode) { throw 'bb-app requires Node.js 22.19 or newer (22.19, 24, and 26 are tested), but node is not on PATH.' }",
+    "if ($null -eq $bbNode) { throw 'bb-app requires Node.js 22.23.4+, 24.22.1+, or 26.12.1+, but node is not on PATH.' }",
     "$bbInstaller = Join-Path ([IO.Path]::GetTempPath()) ('bb-install-machine-' + [guid]::NewGuid().ToString('N') + '.mjs')",
     "[IO.File]::WriteAllText($bbInstaller, @'",
     installer.replace(/\r?\n$/u, ""),

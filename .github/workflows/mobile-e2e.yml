@@ -35,7 +35,7 @@ concurrency:
 
 env:
   PNPM_VERSION: 9.15.0
-  NODE_VERSION: 22.x
+  NODE_VERSION: 22.23.4
   MAESTRO_VERSION: 2.8.0
   # sha256 of the cli-${MAESTRO_VERSION} maestro.zip release asset. Maestro
   # publishes no checksums, so recompute it when bumping the version:

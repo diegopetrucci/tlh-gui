@@ -9,19 +9,46 @@
 - Windows via Ubuntu on WSL2
 - Windows 11 x64 native host (alpha)
 
-Minimum runtime: Node.js 22.19, enforced by `install-machine.sh` and the root
-`engines` field. Lowering the floor needs its own test pass.
+Node.js security floors: 22.23.4, 24.22.1, and 26.12.1 on their respective
+release lines. These include the [October 2026 security fixes](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases),
+including the native Brotli decoder fix and the eMudhra CA distrust update.
+The installers and background service command reject older patches and the
+unsupported 23/25 release lines. Future majors above 26 retain the existing
+installer compatibility policy; they are not claimed to be tested.
 
-Tested npm package runtimes:
+The root package permits patched 22/24 and 26.12.1 or newer. The `bb-app` npm
+`engines` field lists the three supported even release lines; npm normally
+surfaces an engine mismatch as a warning. Direct launcher execution and already-installed machine lifecycle commands
+also rely on the operator maintaining a patched runtime; these changes do not
+add a universal startup guard. `.nvmrc` and primary CI pin 22.23.4;
+compatibility smoke pins 24.22.1 and 26.12.1.
 
-- Node.js 22.19 or newer in the Node.js 22 release line
-- Node.js 24 LTS
-- Node.js 26 Current
+### Desktop security limitation (verified October 21, 2026)
 
-Newer release lines are not blocked. `install-machine.sh` gates on the 22.19
-floor only, so a release line we have not tested yet still installs rather than
-failing hard on the day it ships. The `bb-app` npm `engines` field lists the
-tested lines, which npm surfaces as a warning rather than an install failure.
+Electron is pinned to 44.9.3. Its Node TLS patch blocks compromised eMudhra
+public keys, but its [DEPS](https://github.com/electron/electron/blob/v44.9.3/DEPS)
+still selects Node 24.22.0. The available backports do not establish coverage
+of the full Node advisory, especially CVE-2026-111497. Treat the packaged
+desktop backend as **unremediated for the full Node advisory** until Electron
+ships verified fixes and this pin is advanced. Electron 45.0.0 also lists Node
+24.22.0 and is not a verified alternative.
+
+Packaged server and daemon children use Electron with `ELECTRON_RUN_AS_NODE=1`.
+Upgrading host Node, updating npm Undici, or fixing only CA trust does not patch
+that decoder. Account Pooler and hosted account requests use native fetch;
+remote compressed responses can reach it. No application-level decoder
+workaround is claimed here.
+
+Operators must upgrade source/npm host runtimes, reinstall or rebuild native
+modules as needed, and restart affected processes in a separately authorized
+rollout. Rebuild the Modal standard image from the updated digest-pinned
+Dockerfile and recreate affected sandboxes; existing instances retain their old
+runtime. Custom Dockerfiles need their own runtime and CA review. The Dockerfile
+installs Debian `ca-certificates`; deployment must verify a patched package
+(at least `20250419~deb12u2` for Bookworm) and any custom trust sources.
+Rebuild and distribute desktop artifacts for the available CA fix, while keeping
+the full-advisory blocker visible. A source patch does not update running or
+already distributed applications.
 
 Windows has two host paths. Inside WSL2 the Linux stack runs unchanged:
 
