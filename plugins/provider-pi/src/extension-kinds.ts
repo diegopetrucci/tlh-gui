@@ -44,6 +44,7 @@ export function sanitizePiStatusUsage(text: unknown): string | null {
 export function applyPiStatusRequest(
   current: PiStatusState,
   request: Record<string, unknown>,
+  published: boolean,
 ): PiStatusState | null {
   if (request.method !== "setStatus") {
     return null;
@@ -52,11 +53,11 @@ export function applyPiStatusRequest(
     const fast =
       typeof request.statusText === "string" &&
       request.statusText.trim().length > 0;
-    return fast === current.fast ? null : { ...current, fast };
+    return published && fast === current.fast ? null : { ...current, fast };
   }
   if (request.statusKey === "tlh-usage") {
     const usage = sanitizePiStatusUsage(request.statusText);
-    return usage === current.usage ? null : { ...current, usage };
+    return published && usage === current.usage ? null : { ...current, usage };
   }
   return null;
 }

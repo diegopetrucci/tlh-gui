@@ -37,7 +37,10 @@ The bridge forwards two Pi `setStatus` keys as the extension state kind
 - `usage`: preformatted single-line text from the `tlh-usage` key (control
   characters stripped, capped at 200 characters), or `null`.
 
-State resets to `{ fast: false, usage: null }` when a session is constructed.
+Nothing is emitted when a session is constructed. The first allowlisted
+`setStatus` (`fast` or `tlh-usage`) of each session always publishes a snapshot,
+even if it equals `{ fast: false, usage: null }`, which clears stale persisted
+state; later requests publish only when the state changes.
 The contract: TLH publishes preformatted usage text with
 `ctx.ui.setStatus("tlh-usage", text)` in RPC mode. That TLH-side change is not
 yet implemented, so `usage` stays `null` until it ships.

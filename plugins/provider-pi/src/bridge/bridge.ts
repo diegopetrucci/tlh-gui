@@ -204,6 +204,7 @@ interface ThreadSession {
   construction: PiSessionParams;
   constructionModel: { provider: string; id: string } | undefined;
   status: PiStatusState;
+  statusPublished: boolean;
 }
 
 let sessionSerialCounter = 0;
@@ -440,9 +441,14 @@ function createOnExtensionUiRequest(
   return (request) => {
     const threadSession = getCurrentThreadSession(args);
     if (!threadSession || threadSession.closing) return;
-    const nextStatus = applyPiStatusRequest(threadSession.status, request);
+    const nextStatus = applyPiStatusRequest(
+      threadSession.status,
+      request,
+      threadSession.statusPublished,
+    );
     if (nextStatus) {
       threadSession.status = nextStatus;
+      threadSession.statusPublished = true;
       emitForSession(args.threadId, PI_TLH_STATUS_UPDATED_METHOD, {
         threadId: args.threadId,
         status: nextStatus,
@@ -783,12 +789,9 @@ async function constructPiThreadSession(
     construction: params,
     constructionModel: sessionOptions.model,
     status: INITIAL_PI_STATUS,
+    statusPublished: false,
   };
   sessions.set(threadId, threadSession);
-  emitForSession(threadId, PI_TLH_STATUS_UPDATED_METHOD, {
-    threadId,
-    status: INITIAL_PI_STATUS,
-  });
   try {
     await session.start();
     const liveModel = session.getLiveModel();

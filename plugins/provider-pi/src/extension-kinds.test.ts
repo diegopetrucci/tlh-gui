@@ -21,10 +21,13 @@ describe("applyPiStatusRequest", () => {
     const on = applyPiStatusRequest(
       INITIAL_PI_STATUS,
       setStatus("fast", "fast"),
+      false,
     );
     expect(on).toEqual({ fast: true, usage: null });
-    expect(applyPiStatusRequest(on!, setStatus("fast", "fast"))).toBeNull();
-    expect(applyPiStatusRequest(on!, setStatus("fast"))).toEqual(
+    expect(
+      applyPiStatusRequest(on!, setStatus("fast", "fast"), true),
+    ).toBeNull();
+    expect(applyPiStatusRequest(on!, setStatus("fast"), true)).toEqual(
       INITIAL_PI_STATUS,
     );
   });
@@ -34,10 +37,13 @@ describe("applyPiStatusRequest", () => {
     const set = applyPiStatusRequest(
       { fast: true, usage: null },
       setStatus("tlh-usage", text),
+      true,
     );
     expect(set).toEqual({ fast: true, usage: text });
-    expect(applyPiStatusRequest(set!, setStatus("tlh-usage", text))).toBeNull();
-    expect(applyPiStatusRequest(set!, setStatus("tlh-usage"))).toEqual({
+    expect(
+      applyPiStatusRequest(set!, setStatus("tlh-usage", text), true),
+    ).toBeNull();
+    expect(applyPiStatusRequest(set!, setStatus("tlh-usage"), true)).toEqual({
       fast: true,
       usage: null,
     });
@@ -45,15 +51,32 @@ describe("applyPiStatusRequest", () => {
 
   it("ignores other keys and methods", () => {
     expect(
-      applyPiStatusRequest(INITIAL_PI_STATUS, setStatus("other", "x")),
+      applyPiStatusRequest(INITIAL_PI_STATUS, setStatus("other", "x"), false),
     ).toBeNull();
     expect(
-      applyPiStatusRequest(INITIAL_PI_STATUS, {
-        method: "notify",
-        statusKey: "fast",
-        statusText: "fast",
-      }),
+      applyPiStatusRequest(
+        INITIAL_PI_STATUS,
+        {
+          method: "notify",
+          statusKey: "fast",
+          statusText: "fast",
+        },
+        false,
+      ),
     ).toBeNull();
+  });
+
+  it("always emits the first allowlisted status, then dedupes", () => {
+    const first = applyPiStatusRequest(
+      INITIAL_PI_STATUS,
+      setStatus("fast"),
+      false,
+    );
+    expect(first).toEqual(INITIAL_PI_STATUS);
+    expect(applyPiStatusRequest(first!, setStatus("fast"), true)).toBeNull();
+    expect(
+      applyPiStatusRequest(INITIAL_PI_STATUS, setStatus("tlh-usage"), false),
+    ).toEqual(INITIAL_PI_STATUS);
   });
 
   it("sanitizes usage text", () => {

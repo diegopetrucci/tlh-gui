@@ -258,7 +258,9 @@ it("emits provider-pi/status extension state for fast and tlh-usage only when it
     );
     cursor = await harness.waitForTurnBoundary(threadId, cursor);
   };
-  expect(statuses()).toEqual([{ fast: false, usage: null }]);
+  expect(statuses()).toEqual([]);
+  await send({ statusKey: "fast" });
+  await send({ statusKey: "fast" });
   await send({ statusKey: "fast", statusText: "fast" });
   await send({ statusKey: "fast", statusText: "fast" });
   await send({ statusKey: "unrelated", statusText: "hello" });
