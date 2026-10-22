@@ -4,7 +4,7 @@
   "license": "MIT",
   "type": "module",
   "engines": {
-    "node": ">=22.19.0"
+    "node": "^22.23.4 || ^24.22.1 || >=26.12.1"
   },
   "scripts": {
     "prepare": "turbo run generate:templates generate:plugin-scaffold generate generate:bb-official-marketplace --filter=@bb/templates --filter=@bb/plugin-build --filter=@bb/server --output-logs=errors-only --summarize=false",

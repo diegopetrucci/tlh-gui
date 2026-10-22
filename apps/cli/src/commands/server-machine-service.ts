@@ -19,7 +19,7 @@ import {
 import { stopVerifiedProcess } from "@bb/config/verified-process-stop";
 import { readServerMovedFile } from "@bb/server-archive";
 
-const NODE_REQUIREMENT = "Node.js 22.19 or newer";
+const NODE_REQUIREMENT = "Node.js 22.23.4+, 24.22.1+, or 26.12.1+";
 const NODE_VERSION_TIMEOUT_MS = 10_000;
 const RUNTIME_STOP_TIMEOUT_MS = 15_000;
 const RUNTIME_STOP_KILL_TIMEOUT_MS = 3_000;
@@ -93,8 +93,13 @@ function readPathNodeVersion(): Promise<string | null> {
 }
 
 function supportsServiceNode(version: string): boolean {
-  const [major = 0, minor = 0] = version.split(".").map(Number);
-  return major > 22 || (major === 22 && minor >= 19);
+  const [major = 0, minor = 0, patch = 0] = version.split(".").map(Number);
+  return (
+    major > 26 ||
+    (major === 22 && (minor > 23 || (minor === 23 && patch >= 4))) ||
+    (major === 24 && (minor > 22 || (minor === 22 && patch >= 1))) ||
+    (major === 26 && (minor > 12 || (minor === 12 && patch >= 1)))
+  );
 }
 
 async function assertServiceNode(): Promise<void> {

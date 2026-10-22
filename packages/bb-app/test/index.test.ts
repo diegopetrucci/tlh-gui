@@ -2020,7 +2020,7 @@ describe("bb-app launcher", () => {
   it("limits npm package metadata to documented runtimes", () => {
     const metadata = readPackageMetadata();
 
-    expect(metadata.engines.node).toBe("^22.19.0 || ^24.0.0 || ^26.0.0");
+    expect(metadata.engines.node).toBe("^22.23.4 || ^24.22.1 || ^26.12.1");
     expect(metadata.files).toContain(
       "host-daemon/dist/bb-plugin-host-worker.mjs",
     );

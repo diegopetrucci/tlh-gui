@@ -46,7 +46,8 @@ Node runtime:
 pnpm exec turbo run start --filter=@bb/desktop
 ```
 
-Electron is pinned to `44.3.0`. macOS builds require macOS 13 (Ventura) or
+Electron is pinned to `44.9.3` for the eMudhra CA fix. Full October 2026 Node
+advisory coverage remains blocked; see [platform support](../../docs/platform-support.md#desktop-security-limitation-verified-october-21-2026). macOS builds require macOS 13 (Ventura) or
 newer. The bundled `bb-app` runtime uses `better-sqlite3@13.0.3`, whose N-API
 binaries work with Electron without an ABI-specific rebuild. The packaging
 hook opens an in-memory database with Electron before accepting the packaged
