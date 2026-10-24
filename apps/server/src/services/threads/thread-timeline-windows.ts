@@ -29,6 +29,7 @@ import {
 } from "./timeline-cache.js";
 import { clearTimelineOrderingContextCache } from "./timeline-context-order.js";
 import { createTimelineLatestRowsCache } from "./timeline-latest-rows-cache.js";
+import { isCompactionOfferEnabled } from "./compaction-offer.js";
 import {
   DEFAULT_MAX_INLINE_OUTPUT_CHARS,
   shortenTimelineResponseOutputs,
@@ -114,6 +115,7 @@ export function createThreadTimelineWindows(
     );
     const maxSeq = getLatestThreadSequence(deps.db, { threadId: thread.id });
     const surfaceOptions = {
+      compactionOfferEnabled: isCompactionOfferEnabled(deps, thread.providerId),
       completedTurnDisplay,
       deferContent: request.deferContent,
       includeClearedContextHistory,
@@ -125,6 +127,7 @@ export function createThreadTimelineWindows(
         thread.providerId,
       ),
       providerDisplayName,
+      summarizeShellCommands: settings.summarizeShellCommands,
     };
     const keyArgs = {
       threadId: thread.id,
@@ -224,7 +227,9 @@ export function createThreadTimelineWindows(
   }
 
   function pushThread(threadId: string): void {
-    const targets = deps.hub.listThreadTimelineTargets(threadId);
+    const targets = deps.hub
+      .listWatchedTargets("thread-timeline")
+      .filter((target) => target.threadId === threadId);
     if (targets.length === 0) {
       return;
     }
@@ -305,7 +310,9 @@ export function createThreadTimelineWindows(
     }
     if (
       message.changes.includes("events-appended") &&
-      deps.hub.listThreadTimelineTargets(message.id).length > 0
+      deps.hub
+        .listWatchedTargets("thread-timeline")
+        .some((target) => target.threadId === message.id)
     ) {
       schedulePush(message.id);
     }

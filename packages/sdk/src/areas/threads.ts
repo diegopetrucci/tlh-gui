@@ -1,5 +1,4 @@
 import {
-  parseThreadEventRow,
   type PromptInput,
   type PendingInteraction,
   type PendingInteractionResolution,
@@ -103,6 +102,12 @@ export interface ThreadListArgs {
   projectId?: string;
   signal?: AbortSignal;
   sourceThreadId?: string;
+  /**
+   * Only threads with these IDs, at most 200 per call. The other filters still
+   * apply, unknown and deleted IDs are left out, and an empty list matches no
+   * threads.
+   */
+  threadIds?: readonly string[];
   unsectioned?: boolean;
 }
 
@@ -222,8 +227,7 @@ export type ThreadStorageFilesResult = ThreadStorageFileListResponse;
 export type ThreadStorageLocationResult = ThreadStorageLocationResponse;
 export type ThreadStoragePathsResult = ThreadStoragePathListResponse;
 export type ThreadChildSummaryResult = ThreadChildSummaryResponse;
-export type ThreadDefaultExecutionOptionsResult =
-  ResolvedThreadExecutionOptions | null;
+export type ThreadDefaultExecutionOptionsResult = ResolvedThreadExecutionOptions | null;
 export type ThreadConversationOutlineResult = ThreadConversationOutlineResponse;
 export type ThreadTimelineTurnSummaryDetailsResult =
   TimelineTurnSummaryDetailsResponse;
@@ -720,6 +724,9 @@ function listQuery(args: ThreadListArgs | undefined): ThreadListQuery {
     ...(args?.sectionId ? { sectionId: args.sectionId } : {}),
     ...(args?.originKind ? { originKind: args.originKind } : {}),
     ...(args?.originPluginId ? { originPluginId: args.originPluginId } : {}),
+    ...(args?.threadIds === undefined
+      ? {}
+      : { threadIds: args.threadIds.join(",") }),
     ...(args?.archived === undefined
       ? {}
       : { archived: args.archived ? "true" : "false" }),
@@ -759,6 +766,7 @@ function updateJson(args: ThreadUpdateArgs): UpdateThreadRequest {
     reasoningLevel: args.reasoningLevel,
     sessionOptions: args.sessionOptions,
     visibility: args.visibility,
+    parentNotifications: args.parentNotifications,
   };
 }
 
@@ -770,12 +778,14 @@ function sendJson(args: ThreadSendArgs): SendMessageRequest {
     permissionMode: args.permissionMode,
     reasoningLevel: args.reasoningLevel,
     senderThreadId: args.senderThreadId,
+    originPluginId: args.originPluginId,
     serviceTier: args.serviceTier,
     pluginSubmission: args.pluginSubmission,
     executionInputSources: args.executionInputSources,
     // Present ⇒ the message joins the queue waiting for the clock instead
     // of attempting now; the response reports `delivery: "queued"`.
     sendAt: args.sendAt,
+    compactFirst: args.compactFirst,
   };
 }
 
@@ -999,6 +1009,7 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
       if (statusCode === 204) {
         return null;
       }
+      const { parseThreadEventRow } = await import("./thread-event-parser.js");
       return parseThreadEventRow(await response.json());
     },
   };

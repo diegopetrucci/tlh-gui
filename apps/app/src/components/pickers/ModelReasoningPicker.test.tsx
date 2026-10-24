@@ -25,6 +25,7 @@ import { systemExecutionOptionsQueryKey } from "@/hooks/queries/query-keys";
 import { sdk } from "@/lib/sdk";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
 import { CompactViewportOverrideProvider } from "@bb/shared-ui/hooks/use-compact-viewport";
+import { setPluginAssetIcons } from "@bb/shared-ui/icon-registry";
 import {
   PaneContext,
   type PaneContextValue,
@@ -500,6 +501,31 @@ describe("ModelReasoningPicker", () => {
       ),
     ).not.toBeNull();
   });
+
+  it.each(["cached", "uncached"])(
+    "keeps the selected model visible while its %s catalog loads",
+    (cache) => {
+      renderPicker({
+        modelIsLoading: true,
+        modelValue: "gpt-5.5",
+        modelOptions: cache === "cached" ? codexModels : [],
+        pickerReasoningOptions: cache === "cached" ? reasoningOptions : [],
+      });
+      const trigger = screen.getByRole("button", {
+        name: "Provider, model and reasoning",
+      });
+
+      expect(trigger.textContent).toContain("5.5");
+      expect(trigger.textContent).toContain("Medium");
+      expect(trigger.textContent).not.toContain("Loading models");
+
+      fireEvent.click(trigger);
+
+      expect(
+        screen.getByRole("status", { name: "Loading models" }),
+      ).not.toBeNull();
+    },
+  );
 
   it("holds the trigger and model-list layout with skeletons while loading", () => {
     renderPicker({
@@ -1317,6 +1343,7 @@ describe("buildModelNavRows", () => {
 
 describe("ModelReasoningPicker service tiers", () => {
   beforeAll(() => ModelReasoningMenu.preload());
+  afterEach(() => setPluginAssetIcons(new Map()));
 
   const fast = { id: "fast", label: "Fast", description: "1.5x speed" };
   const ultrafast = { id: "ultrafast", label: "Ultrafast" };
@@ -1407,6 +1434,33 @@ describe("ModelReasoningPicker service tiers", () => {
     expect(screen.getByTitle(/\(Ultrafast mode\)$/)).toBeTruthy();
   });
 
+  it.each([
+    ["fast", "Zap"],
+    ["ultrafast", "provider-codex/ultrafast"],
+  ])("shows the %s tier's icon on the trigger", (tier, icon) => {
+    setPluginAssetIcons(
+      new Map([["provider-codex/ultrafast", "/icons/ultrafast.svg"]]),
+    );
+    renderPicker({
+      serviceTierOptions: [
+        fast,
+        { ...ultrafast, icon: "provider-codex/ultrafast" },
+      ],
+      serviceTierValue: tier,
+    });
+
+    const trigger = screen.getByRole("button", {
+      name: "Provider, model and reasoning",
+    });
+    const icons = [...trigger.querySelectorAll("[data-icon]")].map((node) =>
+      node.getAttribute("data-icon"),
+    );
+    expect(icons).toContain(icon);
+    expect(icons).not.toContain(
+      icon === "Zap" ? "provider-codex/ultrafast" : "Zap",
+    );
+  });
+
   it("lists agent options below the models and reports each change", () => {
     const { onAgentOptionChange } = renderPicker({
       agentSections: buildSessionOptionMenuSections(
@@ -1458,7 +1512,7 @@ describe("ModelReasoningPicker service tiers", () => {
     expect(onAgentOptionChange).toHaveBeenLastCalledWith("depth", "shallow");
   });
 
-  it("keeps a short ladder on one row and lays out a crowded ladder as an even grid", () => {
+  it("keeps reasoning ladders on one compact row", () => {
     const levels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
     const layoutOf = (
       pickerReasoningOptions: readonly PickerOption<ReasoningLevel>[],
@@ -1480,7 +1534,7 @@ describe("ModelReasoningPicker service tiers", () => {
       return [classes.join(" "), speedWraps];
     };
 
-    expect(layoutOf(reasoningOptions)).toEqual(["flex flex-wrap", true]);
+    expect(layoutOf(reasoningOptions)).toEqual(["flex", true]);
     const standardLadder = [
       { value: "low", label: "Low" },
       { value: "medium", label: "Medium" },
@@ -1488,25 +1542,25 @@ describe("ModelReasoningPicker service tiers", () => {
       { value: "xhigh", label: "Extra High" },
       { value: "max", label: "Max" },
     ];
-    expect(layoutOf(standardLadder)).toEqual(["flex flex-wrap", true]);
+    expect(layoutOf(standardLadder)).toEqual(["flex", true]);
     expect(
       layoutOf([...standardLadder, { value: "ultra", label: "Ultra" }]),
-    ).toEqual(["flex flex-wrap", true]);
+    ).toEqual(["flex", true]);
     expect(
       layoutOf([
         ...standardLadder.slice(0, 4),
         { value: "ultracode", label: "Ultracode" },
         { value: "max", label: "Max" },
       ]),
-    ).toEqual(["grid grid-cols-3", true]);
+    ).toEqual(["flex", true]);
     expect(
       layoutOf(levels.map((level) => ({ value: level, label: level }))),
-    ).toEqual(["grid grid-cols-4", true]);
+    ).toEqual(["flex", true]);
     expect(
       layoutOf(
         levels.map((level) => ({ value: level, label: `Thinking: ${level}` })),
       ),
-    ).toEqual(["grid grid-cols-3", true]);
+    ).toEqual(["flex", true]);
   });
 
   it("shows no agent options when the provider reports none", () => {

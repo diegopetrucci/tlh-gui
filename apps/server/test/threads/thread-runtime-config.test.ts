@@ -903,6 +903,7 @@ describe("thread runtime config", () => {
 
       const claudeCode = await build("claude-code");
       expect(claudeCode.options.providerOptions).toEqual({
+        artifactsEnabled: false,
         chromeEnabled: false,
         disable1MContext: false,
         memoryEnabled: true,
@@ -1434,6 +1435,8 @@ describe("thread runtime config", () => {
               description: "Review code from one shared source.",
               filePath: skillFilePath,
               rootKind: "shared-project",
+              realPath: skillFilePath,
+              contentSha256: "a".repeat(64),
               linked: false,
             },
           ],

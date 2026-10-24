@@ -7,6 +7,7 @@ This document is the source of truth for how this fork (`diegopetrucci/tlh-gui`)
 An intake covers exactly one upstream **released stable desktop version tag** matching `desktop-vX.Y.Z` (for example `desktop-v0.45.0`) and the commits reachable from that tag as part of the released history.
 
 **Never** intake from:
+
 - `upstream/main` or any moving branch
 - `desktop-latest`, `desktop-nightly`
 - `pr-evidence*`, `android-testing`, `plugin-*`, `desktop-src-*` tags
@@ -39,16 +40,16 @@ The ledger is JSONL, one JSON object per line, with one record per intake. New i
 
 Field schema:
 
-| Field | Meaning |
-| --- | --- |
-| `date` | Intake integration date (`YYYY-MM-DD`). |
-| `upstream_ref` | Released upstream tag covered by the intake. |
-| `commit` | Exact upstream tag commit SHA. |
-| `intake_type` | `release` — the only accepted intake type. Any between-release intake would require a separately approved policy change. |
-| `integration_pr` | Fork PR number/link, or `n/a (baseline)` for the baseline row. |
-| `status` | `adopted`, `adopted-with-exceptions`, `rejected`, or `baseline`. |
-| `exceptions` | Array of `{ "ref": "...", "reason": "..." }` objects; empty array when nothing was excluded. |
-| `notes` | Free-text context for maintainers. |
+| Field            | Meaning                                                                                                                  |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `date`           | Intake integration date (`YYYY-MM-DD`).                                                                                  |
+| `upstream_ref`   | Released upstream tag covered by the intake.                                                                             |
+| `commit`         | Exact upstream tag commit SHA.                                                                                           |
+| `intake_type`    | `release` — the only accepted intake type. Any between-release intake would require a separately approved policy change. |
+| `integration_pr` | Fork PR number/link, or `n/a (baseline)` for the baseline row.                                                           |
+| `status`         | `adopted`, `adopted-with-exceptions`, `rejected`, or `baseline`.                                                         |
+| `exceptions`     | Array of `{ "ref": "...", "reason": "..." }` objects; empty array when nothing was excluded.                             |
+| `notes`          | Free-text context for maintainers.                                                                                       |
 
 The **git DAG plus `.upstream-ledger.jsonl` are authoritative**. Heuristics such as `git cherry` or `git patch-id` may be useful hints, but they never override the DAG/ledger record.
 
@@ -73,6 +74,7 @@ git fetch upstream
 **Verification:** `git tag -l | grep -v '^upstream/'` should print nothing (all fetched upstream tags land under `upstream/*`). A subsequent `git fetch origin` should leave `git tag -l 'upstream/*'` non-empty.
 
 These repo-local configs are intentional:
+
 - `remote.upstream.tagOpt=--no-tags`: stops automatic tag following into the plain `refs/tags` namespace on every `git fetch upstream`.
 - `remote.upstream.pruneTags=false`: required because a global `fetch.pruneTags=true` makes git fetch add an implicit `refs/tags/*:refs/tags/*` refspec, which would create un-namespaced copies of upstream tags (observed during bootstrap). This setting suppresses that behaviour for the upstream remote.
 - `remote.origin.pruneTags=false`: with a global `fetch.pruneTags=true`, `git fetch origin` prunes every local tag that origin lacks; because `upstream/*` tags are never pushed to origin, all of them would be deleted (observed after the bootstrap PR merge — all upstream tags were removed and had to be re-fetched). This setting preserves namespaced upstream tags across origin fetches.
@@ -82,7 +84,7 @@ The prefix-namespaced tag refspec (`+refs/tags/*:refs/tags/upstream/*`) means mo
 
 ## 5. Workflow policy
 
-Upstream GitHub Actions workflows stay disabled via GitHub repo settings. They are **never edited**. After each intake:
+Upstream GitHub Actions workflows stay disabled via GitHub repo settings. Intake work does not rewrite them; the already-approved runtime-security Node-pin exception documented in the patch inventory is preserved as the sole workflow-content exception. Do not introduce new workflow edits. After each intake:
 
 1. List current workflows: `gh api repos/diegopetrucci/tlh-gui/actions/workflows`
 2. Identify and disable any new upstream workflows added since the previous intake.
@@ -100,6 +102,7 @@ Fork-owned paths that take precedence in merge conflicts:
 - `.github/workflows/tlh-ci.yml` — fork CI
 
 For conflicts in shared paths:
+
 - Prefer config or plugin changes over core patches where possible.
 - Upstream `AGENTS.md` forbids code comments; rationale for core patches lives in `docs/tlh/patch-inventory.md`, not in code.
 

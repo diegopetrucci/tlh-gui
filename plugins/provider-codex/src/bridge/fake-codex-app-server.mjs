@@ -211,6 +211,15 @@ const scriptedTurns = script?.turns ?? null;
 const requestLogPath = script?.requestLogPath ?? null;
 const responseLogPath = script?.responseLogPath ?? null;
 const modelListFailOnceMarkerPath = script?.modelListFailOnceMarkerPath ?? null;
+if (script?.launchLogPath) {
+  appendFileSync(
+    script.launchLogPath,
+    `${JSON.stringify({
+      args: process.argv.slice(2),
+      poolToken: process.env.CODEX_POOL_AUTH_TOKEN ?? null,
+    })}\n`,
+  );
+}
 
 const archiveStatePath = script?.archiveStatePath ?? null;
 
@@ -461,6 +470,9 @@ async function handleRequest(message) {
       } else {
         respond(id, script?.configRead ?? { config: { model: null } });
       }
+      return;
+    case "skills/list":
+      respond(id, script?.skillsList ?? { data: [] });
       return;
     case "skills/extraRoots/set":
       respond(id, {});

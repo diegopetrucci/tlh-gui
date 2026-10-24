@@ -10,7 +10,14 @@ import {
   within,
 } from "@testing-library/react";
 import { createStore, Provider as JotaiProvider } from "jotai";
-import { useContext, useMemo, useState, type ReactNode } from "react";
+import {
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 import { QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { PERSONAL_PROJECT_ID } from "@bb/domain";
@@ -33,8 +40,8 @@ import {
 } from "@/lib/split-layout";
 import type { LayoutNode, PaneContent, SplitLayout } from "@/lib/split-layout";
 import { usePromptDraftStorage } from "@/hooks/usePromptDraftStorage";
+import { registerPaneComposerFocus } from "@/lib/pane-composer-focus";
 import { createBbDesktopApi } from "@/test/bb-desktop-test-utils";
-import { resourceRouteLabelAtom } from "@/components/layout/resourceRouteLabelAtom";
 import {
   resetPluginSlotStoreForTest,
   setPluginSlotRegistrations,
@@ -199,6 +206,7 @@ vi.mock("react-resizable-panels", async () => {
 
 vi.mock("@/components/ui/sidebar.js", () => ({
   useIsSidebarShowing: () => sidebarState.showing,
+  useOptionalIsSidebarShowing: () => sidebarState.showing,
   useSidebarKeepsCollapsedRail: () => false,
   useIsSidebarFramed: () => false,
 }));
@@ -329,6 +337,18 @@ vi.mock("./LazyThreadDetailView", () => ({
       projectId,
       threadId,
     });
+    const composerRootRef = useRef<HTMLDivElement>(null);
+    const textareaRef = useRef<HTMLTextAreaElement>(null);
+    useEffect(() => {
+      const root = composerRootRef.current;
+      if (root === null) return;
+      return registerPaneComposerFocus(root, () => {
+        const textarea = textareaRef.current;
+        if (textarea === null || textarea.disabled) return false;
+        textarea.focus();
+        return true;
+      });
+    }, []);
     return (
       <div
         data-testid={`pane-${threadId}`}
@@ -339,8 +359,9 @@ vi.mock("./LazyThreadDetailView", () => ({
           data-testid={`drag-${threadId}`}
           onPointerDown={(event) => pane?.beginPaneDrag?.(event, threadId)}
         />
-        <div data-promptbox="">
+        <div ref={composerRootRef}>
           <textarea
+            ref={textareaRef}
             data-testid={`draft-${threadId}`}
             value={draft.text}
             onChange={(event) =>
@@ -2540,9 +2561,13 @@ describe("SplitThreadArea", () => {
       (await screen.findByText(path))
         .closest("header")
         ?.querySelector('[data-testid="app-page-header-content-row"]');
-    expect((await contentRow("top-left"))?.className).toContain("pl-[104px]");
+    expect((await contentRow("top-left"))?.className).toContain(
+      "pl-(--bb-macos-collapsed-top-left-reserve)",
+    );
     for (const path of ["top-right", "bottom-left", "bottom-right"]) {
-      expect((await contentRow(path))?.className).not.toContain("pl-[104px]");
+      expect((await contentRow(path))?.className).not.toContain(
+        "pl-(--bb-macos-collapsed-top-left-reserve)",
+      );
     }
 
     expect(screen.getAllByRole("button", { name: /Full Screen/ })).toHaveLength(
@@ -2710,7 +2735,7 @@ describe("SplitThreadArea", () => {
     );
   });
 
-  it("uses automation breadcrumbs in the split-owned plugin header", async () => {
+  it("uses page-owned breadcrumbs in the split-owned plugin header", async () => {
     setPluginSlotRegistrations(
       "automations",
       makePluginRegistrationSet({
@@ -2721,6 +2746,12 @@ describe("SplitThreadArea", () => {
             icon: "Clock",
             path: "automations",
             component: () => <div>Automation detail</div>,
+            experimental_usePageTitle: () => ({
+              breadcrumbs: [
+                { label: "Installed", to: "/plugins/automations/automations" },
+                { label: "Weekly review" },
+              ],
+            }),
           },
         ],
         threadPanelActions: [],
@@ -2735,7 +2766,7 @@ describe("SplitThreadArea", () => {
       panelPath: "automations",
       subPath: "proj_personal/weekly-review",
     };
-    const store = renderSplitArea({
+    renderSplitArea({
       path: "/plugins/automations/automations/proj_personal/weekly-review",
       layout: {
         root: { type: "pane", paneId: "pane-automation", content },
@@ -2747,14 +2778,9 @@ describe("SplitThreadArea", () => {
     const breadcrumb = await screen.findByRole("navigation", {
       name: "Breadcrumb",
     });
-    expect(breadcrumb.textContent).toContain("Automations");
     expect(breadcrumb.textContent).toContain("Installed");
-    expect(breadcrumb.textContent).toContain("weekly-review");
-
-    store.set(resourceRouteLabelAtom, "Weekly review");
-    await waitFor(() =>
-      expect(breadcrumb.textContent).toContain("Weekly review"),
-    );
+    expect(breadcrumb.textContent).toContain("Weekly review");
+    expect(screen.getByText("Automations")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("link", { name: "Installed" }));
     expect(screen.getByTestId("location").textContent).toBe(

@@ -13,6 +13,7 @@ import {
   getAppSettings,
   getDisabledProviderIds,
   listRunningThreads,
+  setAppSettings,
 } from "@bb/db";
 import { initDb } from "./db.js";
 import { createApp } from "./server.js";
@@ -139,6 +140,15 @@ export async function runServer(serverConfig: ServerConfig): Promise<void> {
       logger,
     });
   }
+  if (serverConfig.BB_SKIP_ONBOARDING) {
+    const settings = getAppSettings(db);
+    if (settings.onboardingCompletedAt === null) {
+      setAppSettings(db, {
+        ...settings,
+        onboardingCompletedAt: new Date().toISOString(),
+      });
+    }
+  }
   const serverMoveRun =
     pendingServerMove === null
       ? await reconcileServerMoveRunAtBoot({
@@ -164,6 +174,7 @@ export async function runServer(serverConfig: ServerConfig): Promise<void> {
     appVersion: serverConfig.BB_APP_VERSION,
     builtinSkillsRootPath: resolveBuiltinSkillsRootPath(),
     marketplaceUrl: serverConfig.BB_MARKETPLACE_URL,
+    connectGateKeysUrl: serverConfig.BB_CONNECT_GATE_KEYS_URL,
     customModels: [],
     dataDir: serverConfig.BB_DATA_DIR,
     featureFlags: serverConfig.featureFlags,
@@ -299,6 +310,7 @@ export async function runServer(serverConfig: ServerConfig): Promise<void> {
     pluginCatalogService,
     pluginService,
     serverMove,
+    tunnelIngress,
   } = createApp(
     {
       appUpdate,
@@ -498,6 +510,7 @@ export async function runServer(serverConfig: ServerConfig): Promise<void> {
           resolve();
         });
       });
+      await tunnelIngress.closeAll();
       await closeWebSockets();
       await closeServer;
     })();

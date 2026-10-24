@@ -71,6 +71,7 @@ interface RegisterCommandRpcArgs {
   sessionId: string;
   commands: HostProviderCommand[];
   skills?: DiscoveredSkill[];
+  liveCommands?: { name: string; description: string }[];
   resolved?: ExperimentalNativeRootsResolveAnswer;
   resolveDelayMs?: number;
 }
@@ -120,6 +121,9 @@ function registerCommandRpc(
       if (request.command.type === "host.list_commands") {
         stub.requests.push(request);
         return { ok: true, result: { commands: stub.commands } };
+      }
+      if (request.command.type === "provider.list_commands") {
+        return { ok: true, result: { commands: args.liveCommands ?? [] } };
       }
       if (request.command.type === "host.list_skills") {
         stub.skillRequests.push(request);
@@ -191,6 +195,9 @@ describe("public project command typeahead route", () => {
               filePath:
                 "/tmp/shared-skills/.agents/skills/portable-review/SKILL.md",
               rootKind: "shared-project",
+              realPath:
+                "/tmp/shared-skills/.agents/skills/portable-review/SKILL.md",
+              contentSha256: "a".repeat(64),
               linked: false,
             },
           ],
@@ -788,7 +795,7 @@ describe("public project command typeahead route", () => {
     });
   });
 
-  it("lists user-home commands for the personal project", async () => {
+  it("lists user-home skills and live provider commands for the personal project", async () => {
     await withTestHarness(async (harness) => {
       const { host, session } = seedHostSession(harness.deps, {
         id: "host-commands-personal",
@@ -798,10 +805,13 @@ describe("public project command typeahead route", () => {
         hostId: host.id,
         sessionId: session.id,
         commands: [skill("home-skill", "user")],
+        liveCommands: [
+          { name: "loop", description: "Run a prompt repeatedly" },
+        ],
       });
 
       const response = await harness.app.request(
-        `/api/v1/projects/${PERSONAL_PROJECT_ID}/commands?provider=codex&environmentId=`,
+        `/api/v1/projects/${PERSONAL_PROJECT_ID}/commands?provider=claude-code&environmentId=`,
       );
 
       expect(response.status).toBe(200);
@@ -809,15 +819,16 @@ describe("public project command typeahead route", () => {
       expect(body.commands.map((command) => command.name)).toEqual([
         "clear",
         "compact",
+        "loop",
         "home-skill",
       ]);
       expect(stub.requests[0]?.command).toEqual({
         type: "host.list_commands",
-        providerId: "codex",
+        providerId: "claude-code",
         cwd: null,
         nativeRoots: declaredNativeRootSet(
           harness.deps.providerRegistry,
-          "codex",
+          "claude-code",
         ),
       });
     });
