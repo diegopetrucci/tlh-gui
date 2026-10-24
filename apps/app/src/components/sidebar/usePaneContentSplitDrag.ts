@@ -1,4 +1,7 @@
-import { resolveThreadMentionDropTarget } from "@/lib/thread-mention-drop";
+import {
+  resolveThreadMentionDropTarget,
+  type DroppedThreadMention,
+} from "@/lib/thread-mention-drop";
 import {
   useCallback,
   useMemo,
@@ -73,6 +76,8 @@ interface PaneContentSplitOptions {
   enabled: boolean;
   label: string;
   onNavigate?: () => void;
+  onDragStart?: () => void;
+  dragActivation?: "sidebar" | "distance";
 }
 
 export function usePaneContentSplitActions() {
@@ -97,7 +102,14 @@ export function usePaneContentSplitActions() {
   const onPointerDown = useCallback(
     (
       event: ReactPointerEvent<HTMLElement>,
-      { content, enabled, label, onNavigate }: PaneContentSplitOptions,
+      {
+        content,
+        enabled,
+        label,
+        onNavigate,
+        onDragStart,
+        dragActivation,
+      }: PaneContentSplitOptions,
     ) => {
       if (!enabled || isCompact || event.button !== 0) return;
       beginSidebarPaneContentSplitDrag({
@@ -107,6 +119,8 @@ export function usePaneContentSplitActions() {
         content,
         label,
         onNavigate,
+        onDragStart,
+        dragActivation,
       });
     },
     [isCompact, navigate, store],
@@ -128,6 +142,9 @@ interface BeginSidebarPaneContentSplitDragArgs {
   content: PaneContent;
   label: string;
   onNavigate?: () => void;
+  onDragStart?: () => void;
+  dragActivation?: "sidebar" | "distance";
+  mentionThreads?: readonly DroppedThreadMention[];
 }
 
 export function beginSidebarPaneContentSplitDrag({
@@ -137,6 +154,11 @@ export function beginSidebarPaneContentSplitDrag({
   content,
   label,
   onNavigate,
+  onDragStart,
+  dragActivation = "sidebar",
+  mentionThreads = content.kind === "thread"
+    ? [{ threadId: content.threadId, label }]
+    : [],
 }: BeginSidebarPaneContentSplitDragArgs): void {
   const rowEl = event.currentTarget;
   const sidebarEl = rowEl.closest(SIDEBAR_SELECTOR);
@@ -144,33 +166,33 @@ export function beginSidebarPaneContentSplitDrag({
   const startX = event.clientX;
   const startY = event.clientY;
   const startLayout = store.get(splitLayoutAtom);
-  const fallback = singlePaneFallback(startLayout);
+  const mentionsOnly = mentionThreads.length > 1;
+  const fallback = mentionsOnly ? null : singlePaneFallback(startLayout);
   beginSplitDrag({
     ghostLabel: label,
     cancelSidebarReorderOnEngage: true,
     resolveAuxiliaryTarget:
-      content.kind === "thread"
-        ? (x, y) =>
-            resolveThreadMentionDropTarget(x, y, {
-              threadId: content.threadId,
-              label,
-            })
+      mentionThreads.length > 0
+        ? (x, y) => resolveThreadMentionDropTarget(x, y, mentionThreads)
         : undefined,
     sourceEl: rowEl,
     fadeSourceOnEngage: false,
     renderGhost: false,
+    onEngage: onDragStart,
     ...(fallback ? { fallback } : {}),
     shouldEngage: (x, y) =>
-      shouldEngageSidebarSplitDrag({
-        startX,
-        startY,
-        x,
-        y,
-        sidebarRightEdge,
-      }),
+      dragActivation === "distance"
+        ? Math.hypot(x - startX, y - startY) > 12
+        : shouldEngageSidebarSplitDrag({
+            startX,
+            startY,
+            x,
+            y,
+            sidebarRightEdge,
+          }),
     decide: (_paneId, zone) => {
       const layout = store.get(splitLayoutAtom);
-      if (layout === null) return null;
+      if (layout === null || mentionsOnly) return null;
       return decideThreadDrop({
         zone,
         threadAlreadyOpen: findPaneByContent(layout.root, content) !== null,

@@ -321,6 +321,10 @@ export class RuntimeManager {
     return this.entries.get(environmentId);
   }
 
+  hasPendingEnvironmentProvision(environmentId: string): boolean {
+    return this.pendingEnvironmentProvisions.has(environmentId);
+  }
+
   async getOrAwait(environmentId: string): Promise<RuntimeEntry | undefined> {
     const existing = this.entries.get(environmentId);
     if (existing) {
@@ -589,6 +593,10 @@ export class RuntimeManager {
       throw new Error("Runtime skill staging requires a host dataDir");
     }
     return stageInjectedSkillSources({
+      workspacePath:
+        args.workspacePath ??
+        this.entries.get(args.environmentId)?.path ??
+        null,
       dataDir: this.options.dataDir,
       injectedSkillSources: args.injectedSkillSources,
       ...(this.options.fetchSkillTree !== undefined
