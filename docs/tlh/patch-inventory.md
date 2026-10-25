@@ -68,7 +68,7 @@ for source/runtime limits and operator rollout requirements.
 
 ## Publication and rollout constraints
 
-The desktop-v0.47.1 ledger row records the intake through PR #14. Adoption is authoritative only when the Git DAG includes that PR's merge into `main`; the row on a preparation branch alone does not establish adoption.
+The [desktop-v0.47.1 ledger record](../../.upstream-ledger.jsonl) records PR #14's squash merge as `af0b8aca7a5ef06a05a8d18c241fac83497ff7be` and points to the [ancestry repair PR #15](https://github.com/diegopetrucci/tlh-gui/pull/15). The initial normal merge `f70347ac9d5c3ceb229a4d332f120ef78d38d8f4` was tree-identical; the final ancestry repair PR #15 carries the two metadata changes and is not tree-identical. Adoption is authoritative only when pinned upstream commit `5e1acd765039e874643f34c4d35409e58484e408` is an ancestor of `main`; matching files or PR #14's squash do not establish adoption.
 After this intake reaches `main`, enumerate
 workflows with `gh api repos/diegopetrucci/tlh-gui/actions/workflows`, promptly
 disable the new `close-stale-prs.yml` and `deploy-connect-next.yml` workflows in
