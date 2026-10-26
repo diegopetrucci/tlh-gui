@@ -2090,3 +2090,181 @@ describe("pi delta translation equivalence", () => {
     ]);
   });
 });
+
+describe("pi subagent delegation translation", () => {
+  function subagentDeltas(
+    args: unknown,
+    options?: { toolName?: string; isError?: boolean },
+  ) {
+    const translator = createPiDeltaTranslator({
+      resolveModelContextWindow: builtinCatalogResolver,
+    });
+    const toolName = options?.toolName ?? "subagent";
+    const open = translator.translate(
+      sdkMessage({
+        type: "tool_execution_start",
+        toolCallId: "call-1",
+        toolName,
+        args,
+      }),
+    );
+    const close = translator.translate(
+      sdkMessage({
+        type: "tool_execution_end",
+        toolCallId: "call-1",
+        toolName,
+        result: { content: [{ type: "text", text: "output" }] },
+        isError: options?.isError ?? false,
+      }),
+    );
+    return { open: open[0], close: close.at(-1) };
+  }
+
+  it("renders a single agent call as a delegation with presentation", () => {
+    const { open, close } = subagentDeltas({
+      agent: "code-reviewer",
+      task: "\n  Review the diff\nmore",
+      model: "m1",
+    });
+    const presentation = {
+      label: { pending: "Running subagent", completed: "Subagent finished" },
+      icon: { glyph: "UserRound" },
+      title: "Review the diff",
+      detail: "code-reviewer agent · model m1",
+    };
+    expect(open).toMatchObject({
+      kind: "item.open",
+      item: { type: "delegation", childRef: "call-1", background: false },
+      presentation,
+    });
+    expect(close).toMatchObject({
+      kind: "item.close",
+      status: "completed",
+      resultText: "output",
+      item: { type: "delegation", childRef: "call-1" },
+      presentation,
+    });
+  });
+
+  it("renders parallel tasks with unique agent names", () => {
+    const { open } = subagentDeltas({
+      tasks: [
+        { agent: "a", task: "x" },
+        { agent: "b", task: "y" },
+        { agent: "a", task: "z" },
+      ],
+    });
+    expect(open).toMatchObject({
+      item: { type: "delegation" },
+      presentation: {
+        title: "3 parallel tasks",
+        detail: "a, b",
+      },
+    });
+  });
+
+  it("renders resume with the first message line", () => {
+    const { open } = subagentDeltas({
+      action: "resume",
+      id: "f8a58b07",
+      message: "continue now\nplease",
+    });
+    expect(open).toMatchObject({
+      item: { type: "delegation" },
+      presentation: {
+        title: "Resume f8a58b07: continue now",
+      },
+    });
+    const bare = subagentDeltas({ action: "resume", id: "f8a58b07" });
+    expect(bare.open).toMatchObject({
+      presentation: {
+        title: "Resume f8a58b07",
+      },
+    });
+  });
+
+  it("uses launch labels for async calls without backgrounding", () => {
+    const { open } = subagentDeltas({ agent: "a", task: "t", async: true });
+    expect(open).toMatchObject({
+      item: { type: "delegation", background: false },
+      presentation: {
+        label: {
+          pending: "Launching subagent",
+          completed: "Launched subagent",
+        },
+      },
+    });
+  });
+
+  it("closes a failed delegation as failed", () => {
+    const { close } = subagentDeltas(
+      { agent: "a", task: "t" },
+      { isError: true },
+    );
+    expect(close).toMatchObject({
+      kind: "item.close",
+      status: "failed",
+      item: { type: "delegation" },
+      presentation: expect.anything(),
+    });
+  });
+
+  it("accepts an agent without a task", () => {
+    const { open } = subagentDeltas({ agent: "scout" });
+    expect(open).toMatchObject({
+      item: { type: "delegation" },
+      presentation: { title: "scout", detail: "scout agent" },
+    });
+  });
+
+  it.each([
+    ["completed", false, "final answer"],
+    ["failed", true, "agent crashed"],
+  ])(
+    "carries result text as the %s delegation summary",
+    (_n, isError, text) => {
+      const harness = createHarness();
+      harness.translate(loadFixture("agent-start.json"));
+      harness.translate(
+        sdkMessage({
+          type: "tool_execution_start",
+          toolCallId: "call-9",
+          toolName: "subagent",
+          args: { agent: "a", task: "t" },
+        }),
+      );
+      const events = harness.translate(
+        sdkMessage({
+          type: "tool_execution_end",
+          toolCallId: "call-9",
+          toolName: "subagent",
+          result: { content: [{ type: "text", text: `  ${text}\n` }] },
+          isError,
+        }),
+      );
+      const completed = events.find((event) => event.type === "item/completed");
+      expect(completed).toMatchObject({
+        item: {
+          type: "delegation",
+          status: isError ? "failed" : "completed",
+          summary: text,
+        },
+      });
+    },
+  );
+
+  it.each([
+    ["management action", { action: "list" }, "subagent"],
+    ["resume without id", { action: "resume" }, "subagent"],
+    ["malformed args", { agent: 5, task: "t" }, "subagent"],
+    ["empty tasks", { tasks: [] }, "subagent"],
+    ["subagent_wait", { agent: "a", task: "t" }, "subagent_wait"],
+    ["subagent_supervisor", { agent: "a", task: "t" }, "subagent_supervisor"],
+  ])("falls back to a generic tool for %s", (_name, args, toolName) => {
+    const { open, close } = subagentDeltas(args, { toolName });
+    expect(open).toMatchObject({ item: { type: "tool" } });
+    expect(open).not.toHaveProperty("presentation");
+    expect(close).toMatchObject({ item: { type: "tool" } });
+    expect(close).not.toHaveProperty("presentation");
+  });
+});
