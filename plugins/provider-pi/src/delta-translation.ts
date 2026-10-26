@@ -16,7 +16,11 @@ import {
   toNonNegativeNumber,
   toOptionalString,
   toPositiveNumber,
+  experimental_presentationDetail as presentationDetail,
+  experimental_presentationTitle as presentationTitle,
+  experimental_withTitle as withTitle,
   type DeltaItemShape,
+  type DeltaPresentation,
   type DeltaNoTurnFallback,
   type JsonRpcMessage,
   type ProviderRawEvent,
@@ -242,6 +246,29 @@ const piFileEditBatchSchema = z.array(
   }),
 );
 
+const piSubagentTaskSchema = z.object({
+  agent: z.string().trim().min(1),
+  task: z.string(),
+});
+
+const piSubagentArgsSchema = z
+  .object({
+    action: z.string().optional(),
+    agent: z.string().trim().min(1).optional(),
+    task: z.string().optional(),
+    tasks: z.array(piSubagentTaskSchema).min(1).optional(),
+    id: z.string().trim().min(1).optional(),
+    message: z.string().optional(),
+    model: z.string().optional(),
+    async: z.boolean().optional(),
+  })
+  .passthrough();
+
+interface PiClassifiedTool {
+  shape: DeltaItemShape;
+  presentation?: DeltaPresentation;
+}
+
 type PiAssistantMessage = z.infer<typeof piAssistantMessageSchema>;
 type PiAssistantErrorMessage = PiAssistantMessage & {
   errorMessage: string;
@@ -263,6 +290,72 @@ const ASSISTANT_STREAM_KEY = "assistant";
 
 function thinkingStreamChannel(contentIndex: number): string {
   return `thinking-${contentIndex}`;
+}
+
+function firstNonEmptyLine(text: string | undefined): string | undefined {
+  return text
+    ?.split("\n")
+    .map((line) => line.trim())
+    .find((line) => line.length > 0);
+}
+
+function classifyPiSubagent(
+  toolCallId: string,
+  args: unknown,
+): PiClassifiedTool | null {
+  const parsed = piSubagentArgsSchema.safeParse(args);
+  if (!parsed.success) {
+    return null;
+  }
+  const { action, agent, task, tasks, id, message, model } = parsed.data;
+  let title: string | undefined;
+  let detailParts: string[] = [];
+  if (action === "resume") {
+    if (id === undefined) {
+      return null;
+    }
+    const messageLine = firstNonEmptyLine(message);
+    title =
+      messageLine === undefined
+        ? `Resume ${id}`
+        : `Resume ${id}: ${messageLine}`;
+  } else if (action !== undefined) {
+    return null;
+  } else if (tasks !== undefined) {
+    title = `${tasks.length} parallel tasks`;
+    detailParts = [[...new Set(tasks.map((entry) => entry.agent))].join(", ")];
+  } else if (agent !== undefined) {
+    title = firstNonEmptyLine(task) ?? agent;
+    detailParts = [`${agent} agent`];
+  } else {
+    return null;
+  }
+  const modelDetail = toOptionalString(model);
+  if (modelDetail !== undefined) {
+    detailParts.push(`model ${modelDetail}`);
+  }
+  const base: DeltaPresentation = withTitle(
+    {
+      label:
+        parsed.data.async === true
+          ? { pending: "Launching subagent", completed: "Launched subagent" }
+          : { pending: "Running subagent", completed: "Subagent finished" },
+      icon: { glyph: "UserRound" },
+    },
+    presentationTitle(title),
+  );
+  return {
+    shape: {
+      type: "delegation",
+      childRef: toolCallId,
+      label: title,
+      background: false,
+    },
+    presentation:
+      detailParts.length === 0
+        ? base
+        : { ...base, detail: presentationDetail(detailParts.join(" · ")) },
+  };
 }
 
 function classifyPiToolUse(
@@ -438,6 +531,7 @@ const MAX_STARTED_TOOL_SHAPES = 1024;
 
 interface StartedPiTool {
   shape: DeltaItemShape;
+  presentation?: DeltaPresentation;
   deferredImageReadPath: string | null;
 }
 
@@ -939,11 +1033,19 @@ export function createPiDeltaTranslator(
         if (!piEvent.success) {
           return unexpectedSdkEventDeltas(event, context);
         }
-        const shape = classifyPiToolUse(
-          piEvent.data.toolName,
-          piEvent.data.args,
-          context?.cwd,
-        );
+        const subagent =
+          piEvent.data.toolName === "subagent"
+            ? classifyPiSubagent(piEvent.data.toolCallId, piEvent.data.args)
+            : null;
+        const shape: DeltaItemShape =
+          subagent === null
+            ? classifyPiToolUse(
+                piEvent.data.toolName,
+                piEvent.data.args,
+                context?.cwd,
+              )
+            : subagent.shape;
+        const presentation = subagent?.presentation;
         const deferredImageReadPath = resolvePiImageReadPath(
           piEvent.data.toolName,
           piEvent.data.args,
@@ -951,7 +1053,11 @@ export function createPiDeltaTranslator(
         );
         rememberStartedToolShape(
           toolShapeKey(context, piEvent.data.toolCallId),
-          { shape, deferredImageReadPath },
+          {
+            shape,
+            deferredImageReadPath,
+            ...(presentation === undefined ? {} : { presentation }),
+          },
         );
         if (deferredImageReadPath !== null) {
           return [];
@@ -964,6 +1070,7 @@ export function createPiDeltaTranslator(
               ...parentRefField,
             },
             item: shape,
+            ...(presentation === undefined ? {} : { presentation }),
             noTurnFallback: noTurnFallbackFor(piEvent.data, context),
           },
         ];
@@ -991,6 +1098,12 @@ export function createPiDeltaTranslator(
             ? { type: "imageView", path: deferredImageReadPath }
             : (started?.shape ??
               classifyPiToolResultFallback(piEvent.data.toolName));
+        const closingShape: DeltaItemShape =
+          terminalShape.type === "delegation" &&
+          resultText !== undefined &&
+          resultText.trim().length > 0
+            ? { ...terminalShape, summary: resultText.trim() }
+            : terminalShape;
         const key = {
           providerItemId: piEvent.data.toolCallId,
           ...parentRefField,
@@ -1009,7 +1122,11 @@ export function createPiDeltaTranslator(
             resultText,
             exitCode: piEvent.data.isError ? 1 : 0,
             ...(aggregatedOutput === undefined ? {} : { aggregatedOutput }),
-            item: terminalShape,
+            item: closingShape,
+            ...(started?.presentation === undefined ||
+            terminalShape.type !== "delegation"
+              ? {}
+              : { presentation: started.presentation }),
             noTurnFallback,
           },
         ];
