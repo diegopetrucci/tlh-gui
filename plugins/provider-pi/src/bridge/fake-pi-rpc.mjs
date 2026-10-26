@@ -697,6 +697,49 @@ async function handle(command) {
         pendingMessageCount: followUp.length,
       });
       return;
+    case "get_commands":
+      if (process.env.FAKE_PI_GET_COMMANDS_FAILURE === "reject") {
+        respondError(id, "get_commands", "get_commands failed");
+        return;
+      }
+      if (process.env.FAKE_PI_GET_COMMANDS_MALFORMED === "1") {
+        respond(id, "get_commands", { commands: "not-an-array" });
+        return;
+      }
+      respond(id, "get_commands", {
+        commands: process.env.FAKE_PI_COMMANDS
+          ? JSON.parse(process.env.FAKE_PI_COMMANDS)
+          : [
+              {
+                name: "usage",
+                description: "Show usage",
+                source: "extension",
+                sourceInfo: {},
+              },
+              { name: "bare", source: "extension", sourceInfo: {} },
+              {
+                name: "review",
+                description: "Review changes",
+                source: "prompt",
+                sourceInfo: {},
+              },
+              {
+                name: "skill:tdd",
+                description: "TDD skill",
+                source: "skill",
+                sourceInfo: {},
+              },
+              { name: "clear", source: "extension", sourceInfo: {} },
+              { name: "compact", source: "extension", sourceInfo: {} },
+              {
+                name: "usage",
+                description: "Duplicate",
+                source: "prompt",
+                sourceInfo: {},
+              },
+            ],
+      });
+      return;
     case "get_available_models":
       respond(id, "get_available_models", { models: availableModels });
       if (
@@ -875,6 +918,7 @@ readLines(process.stdin, (line) => {
   if (
     command.type === "abort" ||
     command.type === "get_state" ||
+    command.type === "get_commands" ||
     command.type === "get_session_stats" ||
     (command.type === "prompt" &&
       (supportsSettlement || command.streamingBehavior === "steer"))
