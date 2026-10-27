@@ -310,6 +310,11 @@ function classifyPiSubagent(
   const { action, agent, task, tasks, id, message, model } = parsed.data;
   let title: string | undefined;
   let detailParts: string[] = [];
+  let label = { pending: "Running subagent", completed: "Subagent finished" };
+  const isAsync = parsed.data.async === true;
+  if (isAsync) {
+    label = { pending: "Launching subagent", completed: "Launched subagent" };
+  }
   if (action === "resume") {
     if (id === undefined) {
       return null;
@@ -322,10 +327,22 @@ function classifyPiSubagent(
   } else if (action !== undefined) {
     return null;
   } else if (tasks !== undefined) {
-    title = `${tasks.length} parallel tasks`;
-    detailParts = [[...new Set(tasks.map((entry) => entry.agent))].join(", ")];
+    title = [...new Set(tasks.map((entry) => entry.agent))].join(", ");
+    const noun = tasks.length === 1 ? "subagent" : "subagents";
+    label = isAsync
+      ? {
+          pending: `Launching ${tasks.length} ${noun}`,
+          completed: `Launched ${tasks.length} ${noun}`,
+        }
+      : {
+          pending: `Running ${tasks.length} ${noun}`,
+          completed: `Ran ${tasks.length} ${noun}`,
+        };
   } else if (agent !== undefined) {
     title = firstNonEmptyLine(task) ?? agent;
+    label = isAsync
+      ? { pending: `Launching ${agent}`, completed: `Launched ${agent}` }
+      : { pending: `Running ${agent}`, completed: `Ran ${agent}` };
     detailParts = [`${agent} agent`];
   } else {
     return null;
@@ -336,10 +353,7 @@ function classifyPiSubagent(
   }
   const base: DeltaPresentation = withTitle(
     {
-      label:
-        parsed.data.async === true
-          ? { pending: "Launching subagent", completed: "Launched subagent" }
-          : { pending: "Running subagent", completed: "Subagent finished" },
+      label,
       icon: { glyph: "UserRound" },
     },
     presentationTitle(title),
