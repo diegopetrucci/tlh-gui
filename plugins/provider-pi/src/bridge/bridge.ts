@@ -27,6 +27,7 @@ import {
   modelListParamsSchema,
   runBridgeRequest,
   skillsConfigureParamsSchema,
+  commandListParamsSchema,
   threadDiscardParamsSchema,
   threadForkParamsSchema,
   threadResumeParamsSchema,
@@ -67,6 +68,7 @@ import {
   resetPiInstallGateForTests,
 } from "./provider-maintenance.js";
 import { tlhNotInstalledMessage } from "./tlh-maintenance.js";
+import { createPiCommandListMemo, listPiCommands } from "./commands.js";
 import {
   closeAllPiCatalogs,
   createLiveContextWindowResolver,
@@ -82,6 +84,10 @@ import {
   resolvePiSessionFilePath,
 } from "./session-paths.js";
 import { extractPiPromptInput } from "./turn-input.js";
+
+let listCommandsMemoized = createPiCommandListMemo({
+  list: (cwd) => listPiCommands(cwd, requireExtensionPath()),
+});
 
 const piCommandSchema = z.discriminatedUnion("method", [
   z.object({
@@ -126,6 +132,10 @@ const piCommandSchema = z.discriminatedUnion("method", [
   z.object({
     method: z.literal("thread/discard"),
     params: threadDiscardParamsSchema,
+  }),
+  z.object({
+    method: z.literal("commands/list"),
+    params: commandListParamsSchema,
   }),
   z.object({
     method: z.literal("skills/configure"),
@@ -543,7 +553,7 @@ async function handleRequest(
           grammarVersions: [THREAD_DELTA_GRAMMAR_V3, THREAD_DELTA_GRAMMAR_V3],
           steerMode: "inject",
           skills: { configure: true },
-          commands: { list: false },
+          commands: { list: true },
         },
       };
       sendResult(request.id, result);
@@ -551,6 +561,9 @@ async function handleRequest(
     }
     case "model/list":
       await handleModelList(request.id, request.params);
+      break;
+    case "commands/list":
+      await handleCommandList(request.id, request.params);
       break;
     case "provider/health":
       await handleProviderHealth(request.id, request.params);
@@ -626,6 +639,34 @@ function toPiSessionParams(
     dynamicTools: params.dynamicTools,
     additionalSkillPaths: configuredSkillPaths ?? undefined,
   });
+}
+
+async function handleCommandList(
+  id: string | number,
+  params: { cwd: string },
+): Promise<void> {
+  const gate = await getPiInstallGate();
+  if (!gate.ok) {
+    sendError(
+      id,
+      gate.status === "not_installed"
+        ? BRIDGE_JSON_RPC_ERRORS.MISSING_EXECUTABLE
+        : -32000,
+      gate.status === "not_installed"
+        ? tlhNotInstalledMessage()
+        : (gate.statusMessage ?? "Pi is not supported on this host."),
+    );
+    return;
+  }
+  try {
+    sendResult(id, await listCommandsMemoized(params.cwd));
+  } catch (error) {
+    sendError(
+      id,
+      -32000,
+      error instanceof Error ? error.message : String(error),
+    );
+  }
 }
 
 async function handleModelList(
@@ -1252,6 +1293,9 @@ export async function experimental_closeAllForTests(): Promise<void> {
   await closeThreadSessionsGracefully("Pi bridge test teardown");
   await closeAllPiCatalogs();
   resetPiInstallGateForTests();
+  listCommandsMemoized = createPiCommandListMemo({
+    list: (cwd) => listPiCommands(cwd, requireExtensionPath()),
+  });
   if (scratchDir !== null && scratchDirIsPrivate) {
     rmSync(scratchDir, { recursive: true, force: true });
     scratchDir = null;
