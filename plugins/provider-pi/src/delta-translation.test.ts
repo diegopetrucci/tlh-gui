@@ -2127,7 +2127,10 @@ describe("pi subagent delegation translation", () => {
       model: "m1",
     });
     const presentation = {
-      label: { pending: "Running subagent", completed: "Subagent finished" },
+      label: {
+        pending: "Running code-reviewer",
+        completed: "Ran code-reviewer",
+      },
       icon: { glyph: "UserRound" },
       title: "Review the diff",
       detail: "code-reviewer agent · model m1",
@@ -2157,8 +2160,54 @@ describe("pi subagent delegation translation", () => {
     expect(open).toMatchObject({
       item: { type: "delegation" },
       presentation: {
-        title: "3 parallel tasks",
-        detail: "a, b",
+        label: { pending: "Running 3 subagents", completed: "Ran 3 subagents" },
+        title: "a, b",
+      },
+    });
+    expect(open).not.toMatchObject({
+      presentation: { detail: expect.anything() },
+    });
+  });
+
+  it("uses the singular noun for a single parallel entry", () => {
+    const sync = subagentDeltas({ tasks: [{ agent: "a", task: "x" }] });
+    expect(sync.open).toMatchObject({
+      presentation: {
+        label: { pending: "Running 1 subagent", completed: "Ran 1 subagent" },
+        title: "a",
+      },
+    });
+    const async = subagentDeltas({
+      tasks: [{ agent: "a", task: "x" }],
+      async: true,
+    });
+    expect(async.open).toMatchObject({
+      presentation: {
+        label: {
+          pending: "Launching 1 subagent",
+          completed: "Launched 1 subagent",
+        },
+      },
+    });
+  });
+
+  it("keeps the model detail and async labels for parallel tasks", () => {
+    const { open } = subagentDeltas({
+      tasks: [
+        { agent: "a", task: "x" },
+        { agent: "b", task: "y" },
+      ],
+      model: "m2",
+      async: true,
+    });
+    expect(open).toMatchObject({
+      presentation: {
+        label: {
+          pending: "Launching 2 subagents",
+          completed: "Launched 2 subagents",
+        },
+        title: "a, b",
+        detail: "model m2",
       },
     });
   });
@@ -2175,6 +2224,11 @@ describe("pi subagent delegation translation", () => {
         title: "Resume f8a58b07: continue now",
       },
     });
+    expect(open).toMatchObject({
+      presentation: {
+        label: { pending: "Running subagent", completed: "Subagent finished" },
+      },
+    });
     const bare = subagentDeltas({ action: "resume", id: "f8a58b07" });
     expect(bare.open).toMatchObject({
       presentation: {
@@ -2189,8 +2243,8 @@ describe("pi subagent delegation translation", () => {
       item: { type: "delegation", background: false },
       presentation: {
         label: {
-          pending: "Launching subagent",
-          completed: "Launched subagent",
+          pending: "Launching a",
+          completed: "Launched a",
         },
       },
     });
