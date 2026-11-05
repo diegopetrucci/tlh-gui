@@ -16,7 +16,11 @@ import { threadScope, turnRequestEventDataSchema, turnScope } from "@bb/domain";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { settleDanglingBackgroundTasks } from "../../src/services/threads/background-task-reconciliation.js";
 import { handleDaemonSocketClosed } from "../../src/internal/session-owner-side-effects.js";
-import { internalAuthHeaders } from "../helpers/commands.js";
+import {
+  internalAuthHeaders,
+  reportQueuedCommandSuccess,
+  waitForQueuedCommand,
+} from "../helpers/commands.js";
 import {
   seedEnvironment,
   seedHost,
@@ -34,16 +38,19 @@ import { withTestHarness, type TestAppHarness } from "../helpers/test-app.js";
 const HOST_DISCONNECTED_FOR_MS = 10 * 60_000;
 
 function backgroundTaskItemData(args: {
+  familyId?: string;
   itemId: string;
   taskStatus: string;
   status: string;
+  taskType?: string;
 }): Record<string, unknown> {
   return {
     providerThreadId: "claude-session-1",
     item: {
       id: args.itemId,
       type: "backgroundTask",
-      taskType: "local_workflow",
+      ...(args.familyId === undefined ? {} : { familyId: args.familyId }),
+      taskType: args.taskType ?? "local_workflow",
       description: "fixture workflow",
       status: args.status,
       taskStatus: args.taskStatus,
@@ -56,9 +63,11 @@ function backgroundTaskItemData(args: {
 }
 
 interface SeedOpenBackgroundTaskArgs {
+  familyId?: string;
   itemId?: string;
   taskStatus?: string;
   status?: string;
+  taskType?: string;
 }
 
 function seedOpenBackgroundTaskThread(
@@ -86,9 +95,11 @@ function seedOpenBackgroundTaskThread(
     itemId,
     itemKind: "backgroundTask",
     data: backgroundTaskItemData({
+      familyId: args.familyId,
       itemId,
       status: "pending",
       taskStatus: "running",
+      taskType: args.taskType,
     }),
   });
   seedStoredEvent(harness.deps, {
@@ -101,9 +112,11 @@ function seedOpenBackgroundTaskThread(
     itemId,
     itemKind: "backgroundTask",
     data: backgroundTaskItemData({
+      familyId: args.familyId,
       itemId,
       status: args.status ?? "pending",
       taskStatus: args.taskStatus ?? "running",
+      taskType: args.taskType,
     }),
   });
   return { ...fixture, itemId };
@@ -124,13 +137,14 @@ function seedActiveTurnThread(harness: TestAppHarness) {
 async function reopenSessionWithoutThreads(
   harness: TestAppHarness,
   session: { hostId: string; instanceId: string },
+  instanceId = session.instanceId,
 ): Promise<void> {
   const response = await harness.app.request("/internal/session/open", {
     method: "POST",
     headers: internalAuthHeaders(harness, { hostId: session.hostId }),
     body: JSON.stringify({
       hostId: session.hostId,
-      instanceId: session.instanceId,
+      instanceId,
       hostName: "Test Host",
       hasMachineCredential: false,
       platform: "darwin",
@@ -314,6 +328,92 @@ describe("settleDanglingBackgroundTasks", () => {
       ]);
     });
   });
+
+  it("marks an unclosed TLH run lost while preserving paused and terminal evidence", async () => {
+    await withTestHarness(async (harness) => {
+      const { host, thread, environment } = seedOpenBackgroundTaskThread(
+        harness,
+        {
+          familyId: "pi:detached:run-running",
+          taskType: "local_subagent",
+        },
+      );
+      seedStoredEvent(harness.deps, {
+        threadId: thread.id,
+        environmentId: environment.id,
+        sequence: 4,
+        type: "item/started",
+        scope: threadScope(),
+        providerThreadId: "pi-session-1",
+        itemId: "run-paused",
+        itemKind: "backgroundTask",
+        data: backgroundTaskItemData({
+          familyId: "pi:detached:run-paused",
+          itemId: "run-paused",
+          status: "pending",
+          taskStatus: "paused",
+          taskType: "local_subagent",
+        }),
+      });
+      seedStoredEvent(harness.deps, {
+        threadId: thread.id,
+        environmentId: environment.id,
+        sequence: 5,
+        type: "item/started",
+        scope: threadScope(),
+        providerThreadId: "pi-session-1",
+        itemId: "run-terminal",
+        itemKind: "backgroundTask",
+        data: backgroundTaskItemData({
+          familyId: "pi:detached:run-terminal",
+          itemId: "run-terminal",
+          status: "completed",
+          taskStatus: "completed",
+          taskType: "local_subagent",
+        }),
+      });
+
+      settleDanglingBackgroundTasks(harness.deps, { hostId: host.id });
+
+      const settled = listEvents(harness.deps.db, {
+        threadId: thread.id,
+      })
+        .filter((row) => row.type === "item/backgroundTask/completed")
+        .map((row) => {
+          const data = JSON.parse(row.data) as {
+            item: {
+              error?: string;
+              id: string;
+              status: string;
+              summary?: string;
+              taskStatus: string;
+            };
+          };
+          return data.item;
+        });
+      expect(settled).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: "task:wf-1",
+            error: "Tracking lost; the TLH run may still be running.",
+            status: "failed",
+            taskStatus: "failed",
+          }),
+          expect.objectContaining({
+            id: "run-paused",
+            status: "interrupted",
+            summary: "Detached subagent paused",
+            taskStatus: "paused",
+          }),
+          expect.objectContaining({
+            id: "run-terminal",
+            status: "completed",
+            taskStatus: "completed",
+          }),
+        ] as const),
+      );
+    });
+  });
 });
 
 describe("background-task lifecycle reconciliation triggers", () => {
@@ -354,6 +454,95 @@ describe("background-task lifecycle reconciliation triggers", () => {
       expect(listSettledBackgroundTaskItems(harness, thread.id)).toEqual([
         { status: "interrupted", taskStatus: "stopped" },
       ]);
+    });
+  });
+
+  it("marks a TLH run lost when a restarted daemon has no provider close", async () => {
+    await withTestHarness(async (harness) => {
+      const { session, thread } = seedOpenBackgroundTaskThread(harness, {
+        familyId: "pi:detached:run-restart",
+        taskType: "local_subagent",
+      });
+
+      closeSession(
+        harness.deps.db,
+        harness.deps.hub,
+        session.id,
+        "daemon-disconnect",
+      );
+      await reopenSessionWithoutThreads(harness, session, "instance-restarted");
+
+      const item = JSON.parse(
+        listEvents(harness.deps.db, { threadId: thread.id }).find(
+          (row) => row.type === "item/backgroundTask/completed",
+        )?.data ?? "{}",
+      ) as { item: { error?: string; status: string; taskStatus: string } };
+      expect(item.item).toMatchObject({
+        error: "Tracking lost; the TLH run may still be running.",
+        status: "failed",
+        taskStatus: "failed",
+      });
+    });
+  });
+
+  it("settles a TLH run as lost when Stop gets no provider close", async () => {
+    await withTestHarness(async (harness) => {
+      const { thread } = seedOpenBackgroundTaskThread(harness, {
+        familyId: "pi:detached:run-stop",
+        taskType: "local_subagent",
+      });
+      const stopping = harness.app.request(
+        `/api/v1/threads/${thread.id}/stop`,
+        {
+          method: "POST",
+        },
+      );
+      const stop = await waitForQueuedCommand(
+        harness,
+        ({ command }) =>
+          command.type === "thread.stop" && command.threadId === thread.id,
+      );
+      expect(stop.command).toMatchObject({ intent: "release" });
+      await reportQueuedCommandSuccess(harness, stop, {
+        providerCheckpointId: null,
+      });
+      expect((await stopping).status).toBe(200);
+
+      const item = JSON.parse(
+        listEvents(harness.deps.db, { threadId: thread.id }).find(
+          (row) => row.type === "item/backgroundTask/completed",
+        )?.data ?? "{}",
+      ) as { item: { error?: string; status: string; taskStatus: string } };
+      expect(item.item).toMatchObject({
+        error: "Tracking lost; the TLH run may still be running.",
+        status: "failed",
+        taskStatus: "failed",
+      });
+    });
+  });
+
+  it("settles a TLH run as lost when archive gets no provider close", async () => {
+    await withTestHarness(async (harness) => {
+      const { thread } = seedOpenBackgroundTaskThread(harness, {
+        familyId: "pi:detached:run-archive",
+        taskType: "local_subagent",
+      });
+      const response = await harness.app.request(
+        `/api/v1/threads/${thread.id}/archive-all`,
+        { method: "POST" },
+      );
+      expect(response.status).toBe(200);
+
+      const item = JSON.parse(
+        listEvents(harness.deps.db, { threadId: thread.id }).find(
+          (row) => row.type === "item/backgroundTask/completed",
+        )?.data ?? "{}",
+      ) as { item: { error?: string; status: string; taskStatus: string } };
+      expect(item.item).toMatchObject({
+        error: "Tracking lost; the TLH run may still be running.",
+        status: "failed",
+        taskStatus: "failed",
+      });
     });
   });
 

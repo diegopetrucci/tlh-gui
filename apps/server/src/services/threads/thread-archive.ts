@@ -26,6 +26,7 @@ import {
   dispatchSettledArchivedThreadProviderArchiveCommand,
   requestThreadStopForCurrentState,
 } from "./thread-lifecycle.js";
+import { settleDanglingBackgroundTasksForThread } from "./background-task-reconciliation.js";
 import {
   archiveUndoGraceKeepsTerminals,
   archiveUndoGraceKeepsTurnRunning,
@@ -70,6 +71,17 @@ function archiveThreadWithLifecycleEffects(
   }
   if (!archiveUndoGraceKeepsTurnRunning(archivedThread, now)) {
     requestThreadStopForCurrentState(deps, archivedThread, args.environment);
+    if (
+      args.environment === null ||
+      (archivedThread.status !== "active" &&
+        archivedThread.status !== "stopping")
+    ) {
+      settleDanglingBackgroundTasksForThread(
+        deps,
+        { threadId: archivedThread.id },
+        { onlyTlhDetached: true },
+      );
+    }
   }
   dispatchSettledArchivedThreadProviderArchiveCommand(deps, {
     threadId: archivedThread.id,
@@ -145,12 +157,21 @@ function archiveThreadTrees(
   for (const thread of threads) {
     if (thread.deletedAt !== null) continue;
     if (thread.archivedAt !== null) {
-      if (!archiveUndoGraceKeepsTurnRunning(thread, Date.now()))
-        requestThreadStopForCurrentState(
-          deps,
-          thread,
-          thread.environmentId === null ? null : resolveEnvironment(thread),
-        );
+      if (!archiveUndoGraceKeepsTurnRunning(thread, Date.now())) {
+        const environment =
+          thread.environmentId === null ? null : resolveEnvironment(thread);
+        requestThreadStopForCurrentState(deps, thread, environment);
+        if (
+          environment === null ||
+          (thread.status !== "active" && thread.status !== "stopping")
+        ) {
+          settleDanglingBackgroundTasksForThread(
+            deps,
+            { threadId: thread.id },
+            { onlyTlhDetached: true },
+          );
+        }
+      }
       continue;
     }
     const environment = resolveEnvironment(thread);

@@ -1,5 +1,11 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { z } from "zod";
+import {
+  createDetachedRunReconciler,
+  type DetachedRunCandidate,
+  type DetachedRunOutcomeKind,
+} from "../detached-run-reconciliation.js";
 import { runSettlementError } from "./run-settlement.js";
 import { experimental_buildBridgeToolCallContent as buildBridgeToolCallContent } from "@get-bb/plugin-sdk/provider-bridge";
 import type { ImageContent } from "@earendil-works/pi-ai";
@@ -27,6 +33,7 @@ export interface PiRpcSessionOptions {
   recordThreadId: string;
   noSession?: boolean;
   onExtensionUiRequest?: (request: Record<string, unknown>) => void;
+  onDetachedRunUpdate?: (update: DetachedRunUpdate) => void;
 }
 
 export interface DynamicToolDefinition {
@@ -85,6 +92,53 @@ interface StartReport {
   previousSettlement: SettlementReport | null;
 }
 
+const detachedRunIdSchema = z.string().trim().min(1);
+const detachedRunChannelMessageSchema = z.union([
+  z
+    .object({
+      kind: z.literal("tlh:effective-activity"),
+      activeAsyncJobIds: z.array(detachedRunIdSchema),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("subagent:async-complete"),
+      runId: detachedRunIdSchema,
+      state: z.string().trim().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("subagent:async-complete"),
+      id: detachedRunIdSchema,
+      state: z.string().trim().min(1),
+    })
+    .strict(),
+]);
+
+type DetachedRunChannelMessage = z.infer<
+  typeof detachedRunChannelMessageSchema
+>;
+
+export function parseDetachedRunChannelMessage(
+  value: unknown,
+): DetachedRunChannelMessage | null {
+  const parsed = detachedRunChannelMessageSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+export interface DetachedRunAssociation {
+  readonly candidate: DetachedRunCandidate;
+  readonly toolCallId: string | null;
+  readonly eligible: boolean;
+  readonly outcome: DetachedRunOutcomeKind | null;
+}
+
+export interface DetachedRunUpdate {
+  readonly associations: readonly DetachedRunAssociation[];
+  readonly cleanup: boolean;
+}
+
 function parseSettlementReport(value: unknown): SettlementReport | null {
   if (
     !value ||
@@ -122,6 +176,7 @@ function readinessTimeoutMs(): number {
 }
 const CHANNEL_REQUEST_TIMEOUT_MS = 30_000;
 const AGENT_END_LEAF_TIMEOUT_MS = 5_000;
+const DETACHED_RUN_SETTLEMENT_GRACE_MS = 5_000;
 
 type PiSessionConstructionOutcome = { ok: true } | { ok: false; error: Error };
 
@@ -208,6 +263,19 @@ export class PiRpcSession {
     contextWindow: number;
   } | null = null;
   private liveModel: PiRpcSessionState["model"] | undefined;
+  private readonly detachedRunReconciler = createDetachedRunReconciler();
+  private readonly detachedRunCandidates = new Map<
+    string,
+    DetachedRunCandidate
+  >();
+  private readonly detachedRunToolCallIds = new Map<string, string>();
+  private readonly detachedRunSettlementTimers = new Map<
+    string,
+    ReturnType<typeof setTimeout>
+  >();
+  private readonly detachedRunGraceExpired = new Set<string>();
+  private detachedRunActivityObserved = false;
+  private detachedRunCleanupNotified = false;
   private closed = false;
 
   constructor(
@@ -236,6 +304,122 @@ export class PiRpcSession {
     return this.lastContextUsage;
   }
 
+  getDetachedRunAssociations(): readonly DetachedRunAssociation[] {
+    return [...this.detachedRunCandidates.values()].flatMap((candidate) => {
+      const outcome = this.detachedRunReconciler.getOutcome(candidate.asyncId);
+      if (
+        outcome === null &&
+        this.detachedRunGraceExpired.has(candidate.asyncId)
+      ) {
+        return [];
+      }
+      return [
+        {
+          candidate: { ...candidate },
+          toolCallId:
+            this.detachedRunToolCallIds.get(candidate.asyncId) ?? null,
+          eligible: this.detachedRunReconciler.isEligible(candidate.asyncId),
+          outcome,
+        },
+      ];
+    });
+  }
+
+  resetDetachedRunTracking(): void {
+    this.clearDetachedRunSettlementTracking();
+    this.detachedRunActivityObserved = false;
+    this.notifyDetachedRunCleanup();
+    this.detachedRunReconciler.reset();
+    this.detachedRunCandidates.clear();
+    this.detachedRunToolCallIds.clear();
+    this.detachedRunCleanupNotified = false;
+  }
+
+  reconcileDetachedRunTracking(): void {
+    if (this.closed) return;
+    this.deliverInOrder(() => {
+      if (!this.closed) {
+        this.notifyDetachedRunUpdate(this.getDetachedRunAssociations(), false);
+      }
+    });
+  }
+
+  private clearDetachedRunSettlementTimer(asyncId: string): void {
+    const timer = this.detachedRunSettlementTimers.get(asyncId);
+    if (timer === undefined) return;
+    clearTimeout(timer);
+    this.detachedRunSettlementTimers.delete(asyncId);
+  }
+
+  private clearDetachedRunSettlementTracking(): void {
+    for (const timer of this.detachedRunSettlementTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.detachedRunSettlementTimers.clear();
+    this.detachedRunGraceExpired.clear();
+  }
+
+  private expireDetachedRunSettlement(asyncId: string): void {
+    this.detachedRunSettlementTimers.delete(asyncId);
+    if (this.closed || !this.detachedRunActivityObserved) return;
+    if (
+      this.detachedRunReconciler.getOutcome(asyncId) !== null ||
+      this.detachedRunReconciler.isEligible(asyncId)
+    ) {
+      return;
+    }
+    this.detachedRunGraceExpired.add(asyncId);
+    this.queueDetachedRunUpdate(this.getDetachedRunAssociations());
+  }
+
+  private syncDetachedRunSettlementTimers(): void {
+    if (!this.detachedRunActivityObserved) return;
+    for (const candidate of this.detachedRunCandidates.values()) {
+      const outcome = this.detachedRunReconciler.getOutcome(candidate.asyncId);
+      if (
+        outcome !== null ||
+        this.detachedRunReconciler.isEligible(candidate.asyncId)
+      ) {
+        this.clearDetachedRunSettlementTimer(candidate.asyncId);
+        this.detachedRunGraceExpired.delete(candidate.asyncId);
+        continue;
+      }
+      if (
+        this.detachedRunGraceExpired.has(candidate.asyncId) ||
+        this.detachedRunSettlementTimers.has(candidate.asyncId)
+      ) {
+        continue;
+      }
+      const timer = setTimeout(
+        () => this.expireDetachedRunSettlement(candidate.asyncId),
+        DETACHED_RUN_SETTLEMENT_GRACE_MS,
+      );
+      this.detachedRunSettlementTimers.set(candidate.asyncId, timer);
+    }
+  }
+
+  private notifyDetachedRunUpdate(
+    associations: readonly DetachedRunAssociation[],
+    cleanup: boolean,
+  ): void {
+    this.options.onDetachedRunUpdate?.({ associations, cleanup });
+  }
+
+  private notifyDetachedRunCleanup(): void {
+    if (this.detachedRunCleanupNotified) return;
+    this.detachedRunCleanupNotified = true;
+    this.notifyDetachedRunUpdate(this.getDetachedRunAssociations(), true);
+  }
+
+  private disposeDetachedRunTracking(): void {
+    this.clearDetachedRunSettlementTracking();
+    this.detachedRunActivityObserved = false;
+    this.notifyDetachedRunCleanup();
+    this.detachedRunReconciler.dispose();
+    this.detachedRunCandidates.clear();
+    this.detachedRunToolCallIds.clear();
+  }
+
   async start(): Promise<void> {
     await runPiTransientAuthConstruction({
       attempt: () => this.spawnAndVerify(),
@@ -250,6 +434,7 @@ export class PiRpcSession {
   }
 
   private async spawnAndVerify(): Promise<PiSessionConstructionOutcome> {
+    this.resetDetachedRunTracking();
     const toolsFilePath = join(
       this.options.scratchDir,
       `pi-tools-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}.json`,
@@ -483,6 +668,7 @@ export class PiRpcSession {
       "Pi session closed before input was consumed",
     );
     this.closed = true;
+    this.disposeDetachedRunTracking();
     if (!child || child.exited) {
       return this.lastKnownLeafId ?? undefined;
     }
@@ -501,6 +687,7 @@ export class PiRpcSession {
 
   kill(): void {
     this.closed = true;
+    this.disposeDetachedRunTracking();
     this.child?.kill();
   }
 
@@ -600,6 +787,21 @@ export class PiRpcSession {
       return;
     }
     const event = raw as PiRpcEvent;
+    let detachedRunUpdate: readonly DetachedRunAssociation[] | undefined;
+    if (event.type === "tool_execution_end" && event.toolName === "subagent") {
+      const candidate = this.detachedRunReconciler.recordResult(event);
+      if (candidate !== null) {
+        this.detachedRunCandidates.set(candidate.asyncId, candidate);
+        if (
+          typeof event.toolCallId === "string" &&
+          !this.detachedRunToolCallIds.has(candidate.asyncId)
+        ) {
+          this.detachedRunToolCallIds.set(candidate.asyncId, event.toolCallId);
+        }
+        this.syncDetachedRunSettlementTimers();
+        detachedRunUpdate = this.getDetachedRunAssociations();
+      }
+    }
     if (event.type === "agent_settled" && this.supportsSettlement) {
       this.deliverInOrder(async () => {
         this.deliverSettlement(await this.takeAgentSettledLeaf());
@@ -699,6 +901,9 @@ export class PiRpcSession {
     }
     this.deliverInOrder(() => {
       this.onEvent(event);
+      if (detachedRunUpdate !== undefined) {
+        this.notifyDetachedRunUpdate(detachedRunUpdate, false);
+      }
     });
   }
 
@@ -708,9 +913,18 @@ export class PiRpcSession {
     return this.deliveryChain;
   }
 
+  private queueDetachedRunUpdate(
+    associations: readonly DetachedRunAssociation[],
+  ): void {
+    this.deliverInOrder(() => {
+      if (!this.closed) this.notifyDetachedRunUpdate(associations, false);
+    });
+  }
+
   private failSettlementProtocol(): void {
     if (this.closed) return;
     this.closed = true;
+    this.disposeDetachedRunTracking();
     this.isProcessing = false;
     const error = new Error(
       "Pi extension settlement identity is missing or invalid",
@@ -900,6 +1114,27 @@ export class PiRpcSession {
 
   private handleChannelMessage(message: Record<string, unknown>): void {
     const child = this.child;
+    const detachedMessage = parseDetachedRunChannelMessage(message);
+    if (detachedMessage?.kind === "tlh:effective-activity") {
+      if (this.detachedRunReconciler.recordActivitySnapshot(detachedMessage)) {
+        this.detachedRunActivityObserved = true;
+        this.syncDetachedRunSettlementTimers();
+        this.queueDetachedRunUpdate(this.getDetachedRunAssociations());
+      }
+      return;
+    }
+    if (detachedMessage?.kind === "subagent:async-complete") {
+      if (this.detachedRunReconciler.recordOutcome(detachedMessage)) {
+        const asyncId =
+          "runId" in detachedMessage
+            ? detachedMessage.runId
+            : detachedMessage.id;
+        this.clearDetachedRunSettlementTimer(asyncId);
+        this.detachedRunGraceExpired.delete(asyncId);
+        this.queueDetachedRunUpdate(this.getDetachedRunAssociations());
+      }
+      return;
+    }
     if (message.kind === "ready") {
       this.supportsSettlement = message.agentSettled === true;
       this.ready.resolve();
@@ -1027,6 +1262,7 @@ export class PiRpcSession {
   private handleExit(info: PiRpcChildExitInfo): void {
     const wasClosed = this.closed;
     this.closed = true;
+    this.disposeDetachedRunTracking();
     this.ready.reject(new PiRpcChildExitedError(info));
     for (const [, reply] of this.channelReplies) {
       reply.reject(new PiRpcChildExitedError(info));

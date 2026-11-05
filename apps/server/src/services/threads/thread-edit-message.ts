@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { and, desc, eq, isNull, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm";
 import {
   deleteThreadEventSuffixInTransaction,
   deleteQueuedRetriesForThreadEventSuffixInTransaction,
@@ -11,7 +11,6 @@ import {
   hasRootStoredTurnStarted,
   classifyStoredProviderThreadClaim,
   wouldRemoveSharedProviderSessionClaim,
-  listOpenBackgroundTaskItemRowsForThread,
   listThreadEventSuffixBackgroundSettlementRows,
   type AppendStoredThreadEventArgs,
   type DbQueryConnection,
@@ -59,6 +58,11 @@ import {
   requestThreadStopForCurrentState,
   stopThreadForCurrentState,
 } from "./thread-lifecycle.js";
+import {
+  hasBackgroundTaskWorkRequiringStop,
+  hasKnownActiveTlhDetachedBackgroundTask,
+  isTlhDetachedBackgroundTaskItem,
+} from "./background-task-reconciliation.js";
 import { getLeadingAgentOnlyInput } from "./deferred-first-turn-context.js";
 import {
   resolveThreadMessageEditRefusal,
@@ -135,9 +139,99 @@ function findCommittedOperation(
 }
 
 const EDIT_MESSAGE_STOP_TIMEOUT_MS = 60_000;
+const TLH_TRACKING_LOST_ERROR =
+  "Tracking lost; the TLH run may still be running.";
+const MESSAGE_EDIT_TLH_EVENT_TYPES = [
+  "item/started",
+  "item/backgroundTask/progress",
+  "item/backgroundTask/completed",
+] as const;
 
 function isMessageEditThreadQuiescent(thread: Pick<Thread, "status">): boolean {
   return thread.status === "idle" || thread.status === "error";
+}
+
+function hasNewUnresolvedTlhDetachedBackgroundTask(
+  db: DbQueryConnection,
+  args: { afterSequence: number; threadId: string },
+): boolean {
+  const rows = db
+    .select()
+    .from(events)
+    .where(
+      and(
+        eq(events.threadId, args.threadId),
+        gt(events.sequence, args.afterSequence),
+        eq(events.itemKind, "backgroundTask"),
+        inArray(events.type, [...MESSAGE_EDIT_TLH_EVENT_TYPES]),
+      ),
+    )
+    .orderBy(events.sequence)
+    .all();
+  const tlhItemIds = new Set<string>();
+  const familyIdByItemId = new Map<string, string>();
+  const unresolvedByFamilyId = new Map<string, boolean>();
+  for (const row of rows) {
+    const event = parseStoredEvent(row);
+    if (
+      event.type !== "item/started" &&
+      event.type !== "item/backgroundTask/progress" &&
+      event.type !== "item/backgroundTask/completed"
+    ) {
+      continue;
+    }
+    if (event.item.type !== "backgroundTask") continue;
+    const isTlhItem =
+      tlhItemIds.has(event.item.id) ||
+      isTlhDetachedBackgroundTaskItem(event.item);
+    if (!isTlhItem) continue;
+
+    const previousFamilyId = familyIdByItemId.get(event.item.id);
+    const fallbackFamilyId = `item:${event.item.id}`;
+    const familyId =
+      event.item.familyId ?? previousFamilyId ?? fallbackFamilyId;
+    if (previousFamilyId !== undefined && previousFamilyId !== familyId) {
+      const previousUnresolved = unresolvedByFamilyId.get(previousFamilyId);
+      if (
+        previousUnresolved !== undefined &&
+        !unresolvedByFamilyId.has(familyId)
+      ) {
+        unresolvedByFamilyId.set(familyId, previousUnresolved);
+      }
+      unresolvedByFamilyId.delete(previousFamilyId);
+    }
+
+    tlhItemIds.add(event.item.id);
+    familyIdByItemId.set(event.item.id, familyId);
+    unresolvedByFamilyId.set(
+      familyId,
+      event.item.taskStatus === "pending" ||
+        event.item.taskStatus === "running" ||
+        (event.item.taskStatus === "failed" &&
+          event.item.error === TLH_TRACKING_LOST_ERROR),
+    );
+  }
+  return [...unresolvedByFamilyId.values()].some(Boolean);
+}
+
+function hasMessageEditTlhConflict(
+  db: DbQueryConnection,
+  args: { afterSequence: number; threadId: string },
+): boolean {
+  const known = hasKnownActiveTlhDetachedBackgroundTask(db, {
+    threadId: args.threadId,
+  });
+  const newer = hasNewUnresolvedTlhDetachedBackgroundTask(db, args);
+  return known || newer;
+}
+
+function rejectMessageEditForTlhConflict(
+  db: DbQueryConnection,
+  args: { afterSequence: number; threadId: string },
+): void {
+  if (hasMessageEditTlhConflict(db, args)) {
+    conflict("Cannot edit a message while a TLH detached run is active");
+  }
 }
 
 async function stopThreadBeforeMessageEdit(
@@ -506,6 +600,12 @@ export async function editThreadMessage(
   }
   const initialThread = getThread(deps.db, args.thread.id);
   if (!initialThread) conflict("Thread not found");
+  const initialEventSequence =
+    getHighWaterMarks(deps.db, [initialThread.id])[initialThread.id] ?? 0;
+  rejectMessageEditForTlhConflict(deps.db, {
+    afterSequence: initialEventSequence,
+    threadId: initialThread.id,
+  });
   const senderThreadId = resolveMessageSenderThreadId(deps, {
     senderThreadId: args.payload.senderThreadId,
     targetThread: initialThread,
@@ -526,13 +626,21 @@ export async function editThreadMessage(
     environment: args.environment,
     threadId: initialThread.id,
   });
+  rejectMessageEditForTlhConflict(deps.db, {
+    afterSequence: initialEventSequence,
+    threadId: initialThread.id,
+  });
   if (
-    listOpenBackgroundTaskItemRowsForThread(deps.db, {
+    hasBackgroundTaskWorkRequiringStop(deps.db, {
       threadId: initialThread.id,
-    }).length > 0
+    })
   ) {
     await ensureHostSessionReadyForWork(deps, {
       hostId: args.environment.hostId,
+    });
+    rejectMessageEditForTlhConflict(deps.db, {
+      afterSequence: initialEventSequence,
+      threadId: initialThread.id,
     });
     await stopThreadForCurrentState(deps, editableThread, args.environment, {
       requireStopped: true,
@@ -550,6 +658,10 @@ export async function editThreadMessage(
   const readyEnvironment = requireReadyThreadEnvironment(args.environment);
   await ensureHostSessionReadyForWork(deps, {
     hostId: readyEnvironment.hostId,
+  });
+  rejectMessageEditForTlhConflict(deps.db, {
+    afterSequence: initialEventSequence,
+    threadId: initialThread.id,
   });
   const execution = await buildExecutionOptions(deps, args.payload, {
     threadId: editableThread.id,
@@ -575,6 +687,10 @@ export async function editThreadMessage(
       projectId: editableThread.projectId,
       providerId: editableThread.providerId,
       syncGeneratedTitle: false,
+    });
+    rejectMessageEditForTlhConflict(deps.db, {
+      afterSequence: initialEventSequence,
+      threadId: initialThread.id,
     });
     const prepared: HostDaemonCommandResult<"thread.rewind.prepare"> =
       await runLiveHostCommand(deps, {
@@ -636,6 +752,10 @@ export async function editThreadMessage(
         if (!isMessageEditThreadQuiescent(currentThread)) {
           conflict("The thread changed while the edit was being prepared");
         }
+        rejectMessageEditForTlhConflict(tx, {
+          afterSequence: initialEventSequence,
+          threadId: editableThread.id,
+        });
         const currentTarget = resolveEditableTurn(
           tx,
           deps,

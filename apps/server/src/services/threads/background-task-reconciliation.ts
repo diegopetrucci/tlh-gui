@@ -4,17 +4,20 @@ import {
   listOpenBackgroundTaskItemRowsForHost,
   listOpenBackgroundTaskItemRowsForThread,
   type DbNotifier,
+  type DbQueryConnection,
   type DbTransaction,
   type OpenBackgroundTaskItemRow,
 } from "@bb/db";
 import {
   backgroundTaskItemStatus,
   isSettledBackgroundTaskStatus,
+  LOCAL_SUBAGENT_TASK_TYPE,
   threadEventBackgroundTaskItemSchema,
   threadScope,
 } from "@bb/domain";
 import type { ThreadEventBackgroundTaskItem } from "@bb/domain";
 import type { AppDeps } from "../../types.js";
+import { NotificationBuffer } from "../lib/notification-buffer.js";
 import { appendThreadEventsInTransaction } from "./thread-events.js";
 
 interface SettleDanglingBackgroundTasksArgs {
@@ -31,6 +34,10 @@ type SettleDanglingBackgroundTasksTransactionDeps = {
 const storedBackgroundTaskEventDataSchema = z.object({
   item: threadEventBackgroundTaskItemSchema,
 });
+const TLH_DETACHED_RUN_FAMILY_PREFIX = "pi:detached:";
+const TLH_TRACKING_LOST_ERROR =
+  "Tracking lost; the TLH run may still be running.";
+const TLH_PAUSED_SUMMARY = "Detached subagent paused";
 
 function parseStoredBackgroundTaskItem(
   row: OpenBackgroundTaskItemRow,
@@ -43,6 +50,47 @@ function parseStoredBackgroundTaskItem(
   } catch {
     return null;
   }
+}
+
+export function isTlhDetachedBackgroundTaskItem(
+  item: Pick<ThreadEventBackgroundTaskItem, "familyId" | "taskType">,
+): boolean {
+  return (
+    item.taskType === LOCAL_SUBAGENT_TASK_TYPE &&
+    item.familyId?.startsWith(TLH_DETACHED_RUN_FAMILY_PREFIX) === true
+  );
+}
+
+export function hasKnownActiveTlhDetachedBackgroundTask(
+  db: DbQueryConnection,
+  args: { threadId: string },
+): boolean {
+  return listOpenBackgroundTaskItemRowsForThread(db, args).some((row) => {
+    const item = parseStoredBackgroundTaskItem(row);
+    return (
+      item !== null &&
+      isTlhDetachedBackgroundTaskItem(item) &&
+      (item.taskStatus === "pending" || item.taskStatus === "running")
+    );
+  });
+}
+
+export function hasBackgroundTaskWorkRequiringStop(
+  db: SettleDanglingBackgroundTasksDeps["db"],
+  args: { threadId: string },
+): boolean {
+  return listOpenBackgroundTaskItemRowsForThread(db, args).some((row) => {
+    const item = parseStoredBackgroundTaskItem(row);
+    if (
+      item !== null &&
+      isTlhDetachedBackgroundTaskItem(item) &&
+      item.taskStatus !== "pending" &&
+      item.taskStatus !== "running"
+    ) {
+      return false;
+    }
+    return true;
+  });
 }
 
 export function settleDanglingBackgroundTasks(
@@ -82,9 +130,19 @@ export function settleDanglingBackgroundTasks(
 export function settleDanglingBackgroundTasksForStoppedThreadInTransaction(
   deps: SettleDanglingBackgroundTasksTransactionDeps,
   args: { threadId: string },
+  options: { onlyTlhDetached?: boolean } = {},
 ): void {
   const rows = listOpenBackgroundTaskItemRowsForThread(deps.db, args);
-  const settledThreadIds = appendDanglingBackgroundTaskCompletions(deps, rows);
+  const selectedRows = options.onlyTlhDetached
+    ? rows.filter((row) => {
+        const item = parseStoredBackgroundTaskItem(row);
+        return item !== null && isTlhDetachedBackgroundTaskItem(item);
+      })
+    : rows;
+  const settledThreadIds = appendDanglingBackgroundTaskCompletions(
+    deps,
+    selectedRows,
+  );
   for (const threadId of settledThreadIds) {
     deps.hub.notifyThread(threadId, ["events-appended"], {
       timelineSequence: getLatestThreadSequence(deps.db, {
@@ -93,6 +151,57 @@ export function settleDanglingBackgroundTasksForStoppedThreadInTransaction(
       eventTypes: ["item/backgroundTask/completed"],
     });
   }
+}
+
+export function settleDanglingBackgroundTasksForThread(
+  deps: SettleDanglingBackgroundTasksDeps,
+  args: { threadId: string },
+  options: { onlyTlhDetached?: boolean } = {},
+): void {
+  const notificationBuffer = new NotificationBuffer();
+  deps.db.transaction(
+    (tx) =>
+      settleDanglingBackgroundTasksForStoppedThreadInTransaction(
+        { db: tx, hub: notificationBuffer, logger: deps.logger },
+        args,
+        options,
+      ),
+    { behavior: "immediate" },
+  );
+  notificationBuffer.flushInto(deps.hub);
+}
+
+function reconcileDanglingBackgroundTaskItem(
+  item: ThreadEventBackgroundTaskItem,
+): ThreadEventBackgroundTaskItem {
+  if (isTlhDetachedBackgroundTaskItem(item)) {
+    if (item.taskStatus === "paused") {
+      return {
+        ...item,
+        status: "interrupted",
+        taskStatus: "paused",
+        summary: item.summary ?? TLH_PAUSED_SUMMARY,
+      };
+    }
+    if (isSettledBackgroundTaskStatus(item.taskStatus)) {
+      return item;
+    }
+    return {
+      ...item,
+      status: "failed",
+      taskStatus: "failed",
+      error: TLH_TRACKING_LOST_ERROR,
+    };
+  }
+
+  const taskStatus = isSettledBackgroundTaskStatus(item.taskStatus)
+    ? item.taskStatus
+    : "stopped";
+  return {
+    ...item,
+    status: backgroundTaskItemStatus(taskStatus),
+    taskStatus,
+  };
 }
 
 function appendDanglingBackgroundTaskCompletions(
@@ -110,9 +219,7 @@ function appendDanglingBackgroundTaskCompletions(
       continue;
     }
     const providerThreadId = row.providerThreadId ?? "";
-    const taskStatus = isSettledBackgroundTaskStatus(item.taskStatus)
-      ? item.taskStatus
-      : "stopped";
+    const settledItem = reconcileDanglingBackgroundTaskItem(item);
     appendThreadEventsInTransaction(deps.db, [
       {
         threadId: row.threadId,
@@ -122,11 +229,7 @@ function appendDanglingBackgroundTaskCompletions(
         scope: threadScope(),
         data: {
           providerThreadId,
-          item: {
-            ...item,
-            status: backgroundTaskItemStatus(taskStatus),
-            taskStatus,
-          },
+          item: settledItem,
         },
       },
     ]);

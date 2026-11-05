@@ -13,6 +13,7 @@ import type {
   ComposerDraftReplacement,
   ComposerDraftSnapshot,
   PluginProviderIconRegistration,
+  PluginSidebarThreadActivity,
 } from "../app-contract.js";
 
 type ExpectedBbPluginApiKey =
@@ -274,6 +275,16 @@ describe("backend plugin SDK public surface", () => {
     }
     expectTypeOf(writeMetadata).toBeFunction();
     expectTypeOf(borrowNestedValue).toBeFunction();
+  });
+
+  it("keeps sidebar activity counts in the public app contract", () => {
+    expectTypeOf<PluginSidebarThreadActivity>().toEqualTypeOf<{
+      workflows: number;
+      backgroundAgents: number;
+      backgroundCommands: number;
+      planMode: number;
+      goals: number;
+    }>();
   });
 
   it("keeps every backend contract export in the root declaration bundle", async () => {

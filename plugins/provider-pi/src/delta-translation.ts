@@ -34,6 +34,10 @@ import {
 import { toCanonicalPiModelId } from "./model-list.js";
 import { piVisibilityMetadata } from "./visibility.js";
 import { runSettlementError } from "./bridge/run-settlement.js";
+import type {
+  DetachedRunMode,
+  DetachedRunOutcomeKind,
+} from "./detached-run-reconciliation.js";
 
 export interface PiContextWindowModel {
   contextWindow?: number;
@@ -537,16 +541,146 @@ interface PiDeltaTranslationContext {
   cwd?: string;
 }
 
+export interface PiDetachedRunAssociation {
+  readonly candidate: {
+    readonly asyncId: string;
+    readonly mode: DetachedRunMode;
+  };
+  readonly toolCallId: string | null;
+  readonly eligible: boolean;
+  readonly outcome: DetachedRunOutcomeKind | null;
+}
+
+export interface PiDetachedRunLifecycleContext {
+  readonly threadId: string;
+  readonly sessionSerial: number;
+  readonly cleanup?: boolean;
+}
+
 interface CreatePiDeltaTranslatorOptions {
   resolveModelContextWindow: PiModelContextWindowResolver;
 }
 
 const MAX_STARTED_TOOL_SHAPES = 1024;
+const MAX_DETACHED_RUN_ROWS = 1024;
+const PI_DETACHED_RUN_FAMILY_PREFIX = "pi:detached:";
+const PI_DETACHED_TRACKING_LOST_MESSAGE =
+  "Tracking lost; the TLH run may still be running.";
 
 interface StartedPiTool {
   shape: DeltaItemShape;
   presentation?: DeltaPresentation;
   deferredImageReadPath: string | null;
+}
+
+type DetachedRunSettlement = DetachedRunOutcomeKind | "tracking-lost";
+
+interface DetachedRunFamilyState {
+  generation: number;
+  reopenable: boolean;
+  settledOutcome: DetachedRunSettlement | null;
+}
+
+interface DetachedRunRowState {
+  sessionSerial: number;
+  asyncId: string;
+  mode: DetachedRunMode;
+  familyId: string;
+  description: string;
+  toolCallId: string | null;
+  providerItemId: string;
+  generation: number;
+  open: boolean;
+  reopenable: boolean;
+  settledOutcome: DetachedRunSettlement | null;
+}
+
+type DetachedRunTaskShape = Extract<DeltaItemShape, { type: "backgroundTask" }>;
+
+function detachedRunIdentity(asyncId: string): string {
+  return encodeURIComponent(asyncId);
+}
+
+function detachedRunFamilyId(asyncId: string): string {
+  return `${PI_DETACHED_RUN_FAMILY_PREFIX}${detachedRunIdentity(asyncId)}`;
+}
+
+function detachedRunDescription(mode: DetachedRunMode): string {
+  return mode === "parallel"
+    ? "TLH detached parallel subagent run"
+    : "TLH detached subagent run";
+}
+
+function detachedRunProviderItemId(
+  familyId: string,
+  generation: number,
+): string {
+  return `${familyId}:g${generation}`;
+}
+
+function detachedRunTaskShape(
+  row: DetachedRunRowState,
+  outcome: DetachedRunOutcomeKind | "tracking-lost" | null,
+): DetachedRunTaskShape {
+  if (outcome === null) {
+    return {
+      type: "backgroundTask",
+      familyId: row.familyId,
+      taskType: "local_subagent",
+      description: row.description,
+      status: "pending",
+      taskStatus: "running",
+      skipTranscript: false,
+      foreground: false,
+    };
+  }
+  if (outcome === "completed") {
+    return {
+      ...detachedRunTaskShape(row, null),
+      status: "completed",
+      taskStatus: "completed",
+      summary: "Detached subagent completed",
+    };
+  }
+  if (outcome === "failed") {
+    return {
+      ...detachedRunTaskShape(row, null),
+      status: "failed",
+      taskStatus: "failed",
+      error: "Detached subagent failed",
+    };
+  }
+  if (outcome === "cancelled") {
+    return {
+      ...detachedRunTaskShape(row, null),
+      status: "interrupted",
+      taskStatus: "stopped",
+      summary: "Detached subagent cancelled",
+    };
+  }
+  if (outcome === "paused") {
+    return {
+      ...detachedRunTaskShape(row, null),
+      status: "interrupted",
+      taskStatus: "paused",
+      summary: "Detached subagent paused",
+    };
+  }
+  return {
+    ...detachedRunTaskShape(row, null),
+    status: "failed",
+    taskStatus: "failed",
+    error: PI_DETACHED_TRACKING_LOST_MESSAGE,
+  };
+}
+
+function detachedRunKey(
+  providerItemId: string,
+  toolCallId: string | null,
+): { providerItemId: string; parentRef?: string } {
+  return toolCallId === null
+    ? { providerItemId }
+    : { providerItemId, parentRef: toolCallId };
 }
 
 export function createPiDeltaTranslator(
@@ -560,10 +694,85 @@ export function createPiDeltaTranslator(
     ThreadEventTokenUsageBreakdown
   >();
   const promptCacheTtlMsByThreadId = new Map<string, number>();
+  const detachedRunRowsByThreadId = new Map<
+    string,
+    Map<string, DetachedRunRowState>
+  >();
+  const detachedRunFamilyStatesByThreadId = new Map<
+    string,
+    Map<string, DetachedRunFamilyState>
+  >();
+  const detachedRunGenerationsByThreadId = new Map<
+    string,
+    Map<string, number>
+  >();
+
+  function detachedRunStateKey(
+    sessionSerial: number,
+    familyId: string,
+  ): string {
+    return `${sessionSerial}\u0000${familyId}`;
+  }
+
+  function rememberDetachedRunFamilyState(
+    threadId: string,
+    row: DetachedRunRowState,
+  ): void {
+    const familyStates =
+      detachedRunFamilyStatesByThreadId.get(threadId) ??
+      new Map<string, DetachedRunFamilyState>();
+    detachedRunFamilyStatesByThreadId.set(threadId, familyStates);
+    const stateKey = detachedRunStateKey(row.sessionSerial, row.familyId);
+    const existing = familyStates.get(stateKey);
+    familyStates.set(stateKey, {
+      generation: Math.max(existing?.generation ?? 0, row.generation),
+      reopenable: row.reopenable,
+      settledOutcome: row.settledOutcome,
+    });
+    const generations =
+      detachedRunGenerationsByThreadId.get(threadId) ??
+      new Map<string, number>();
+    detachedRunGenerationsByThreadId.set(threadId, generations);
+    generations.set(
+      row.familyId,
+      Math.max(generations.get(row.familyId) ?? 0, row.generation),
+    );
+  }
+
+  function nextDetachedRunProviderItemId(
+    threadId: string,
+    row: DetachedRunRowState,
+  ): string {
+    const generations =
+      detachedRunGenerationsByThreadId.get(threadId) ??
+      new Map<string, number>();
+    detachedRunGenerationsByThreadId.set(threadId, generations);
+    const generation = (generations.get(row.familyId) ?? 0) + 1;
+    generations.set(row.familyId, generation);
+    row.generation = generation;
+    row.providerItemId = detachedRunProviderItemId(
+      row.familyId,
+      row.generation,
+    );
+    return row.providerItemId;
+  }
+
+  function detachedRunFamilyState(
+    threadId: string,
+    sessionSerial: number,
+    familyId: string,
+  ): DetachedRunFamilyState | undefined {
+    return detachedRunFamilyStatesByThreadId
+      .get(threadId)
+      ?.get(detachedRunStateKey(sessionSerial, familyId));
+  }
 
   function resetThread(threadId: string): void {
     cumulativeTokensByThreadId.delete(threadId);
     promptCacheTtlMsByThreadId.delete(threadId);
+    detachedRunRowsByThreadId.delete(threadId);
+    detachedRunFamilyStatesByThreadId.delete(threadId);
+    detachedRunGenerationsByThreadId.delete(threadId);
     clearThreadToolShapes({ threadId });
   }
 
@@ -665,6 +874,202 @@ export function createPiDeltaTranslator(
           : {}),
       },
     ];
+  }
+
+  function translateDetachedRunLifecycle(
+    associations: readonly PiDetachedRunAssociation[],
+    context: PiDetachedRunLifecycleContext,
+  ): ThreadDelta[] {
+    const rows =
+      detachedRunRowsByThreadId.get(context.threadId) ??
+      new Map<string, DetachedRunRowState>();
+    detachedRunRowsByThreadId.set(context.threadId, rows);
+    const deltas: ThreadDelta[] = [];
+    const sessionSerial = context.sessionSerial;
+
+    const closeRow = (
+      row: DetachedRunRowState,
+      outcome: DetachedRunSettlement,
+    ): void => {
+      if (!row.open) return;
+      const item = detachedRunTaskShape(row, outcome);
+      deltas.push({
+        kind: "item.close",
+        key: detachedRunKey(row.providerItemId, row.toolCallId),
+        status: item.status,
+        item,
+      });
+      row.open = false;
+      row.settledOutcome = outcome;
+      rememberDetachedRunFamilyState(context.threadId, row);
+    };
+
+    const emitLateTerminalCorrection = (
+      row: DetachedRunRowState,
+      outcome: DetachedRunOutcomeKind,
+    ): void => {
+      nextDetachedRunProviderItemId(context.threadId, row);
+      const item = detachedRunTaskShape(row, outcome);
+      deltas.push({
+        kind: "item.close",
+        key: detachedRunKey(row.providerItemId, row.toolCallId),
+        status: item.status,
+        item,
+      });
+      row.settledOutcome = outcome;
+      row.reopenable = false;
+      rememberDetachedRunFamilyState(context.threadId, row);
+    };
+
+    if (context.cleanup === true) {
+      for (const association of associations) {
+        const outcome = association.outcome;
+        if (outcome === null) continue;
+        const rowKey = detachedRunStateKey(
+          sessionSerial,
+          association.candidate.asyncId,
+        );
+        let row = rows.get(rowKey);
+        if (row === undefined) {
+          const familyId = detachedRunFamilyId(association.candidate.asyncId);
+          const familyState = detachedRunFamilyState(
+            context.threadId,
+            sessionSerial,
+            familyId,
+          );
+          if (
+            familyState?.settledOutcome !== "tracking-lost" ||
+            !familyState.reopenable
+          ) {
+            continue;
+          }
+          row = {
+            sessionSerial,
+            asyncId: association.candidate.asyncId,
+            mode: association.candidate.mode,
+            familyId,
+            description: detachedRunDescription(association.candidate.mode),
+            toolCallId: association.toolCallId,
+            providerItemId: detachedRunProviderItemId(
+              familyId,
+              familyState.generation,
+            ),
+            generation: familyState.generation,
+            open: false,
+            reopenable: familyState.reopenable,
+            settledOutcome: familyState.settledOutcome,
+          };
+          rows.set(rowKey, row);
+        } else if (row.toolCallId === null && association.toolCallId !== null) {
+          row.toolCallId = association.toolCallId;
+        }
+
+        if (row.open) {
+          closeRow(row, outcome);
+          row.reopenable = false;
+          rememberDetachedRunFamilyState(context.threadId, row);
+        } else if (row.settledOutcome === "tracking-lost" && row.reopenable) {
+          emitLateTerminalCorrection(row, outcome);
+        } else if (row.settledOutcome === null) {
+          row.settledOutcome = outcome;
+          row.reopenable = false;
+          rememberDetachedRunFamilyState(context.threadId, row);
+        }
+      }
+      for (const row of rows.values()) {
+        if (row.sessionSerial !== sessionSerial || !row.open) continue;
+        closeRow(row, "tracking-lost");
+        row.reopenable = false;
+        rememberDetachedRunFamilyState(context.threadId, row);
+      }
+      return deltas;
+    }
+
+    const seenRowKeys = new Set<string>();
+    for (const association of associations) {
+      const asyncId = association.candidate.asyncId;
+      const rowKey = detachedRunStateKey(sessionSerial, asyncId);
+      seenRowKeys.add(rowKey);
+      let row = rows.get(rowKey);
+      if (row === undefined) {
+        const familyId = detachedRunFamilyId(asyncId);
+        const familyState = detachedRunFamilyState(
+          context.threadId,
+          sessionSerial,
+          familyId,
+        );
+        row = {
+          sessionSerial,
+          asyncId,
+          mode: association.candidate.mode,
+          familyId,
+          description: detachedRunDescription(association.candidate.mode),
+          toolCallId: association.toolCallId,
+          providerItemId: detachedRunProviderItemId(
+            familyId,
+            familyState?.generation ?? 0,
+          ),
+          generation: familyState?.generation ?? 0,
+          open: false,
+          reopenable: familyState?.reopenable ?? true,
+          settledOutcome: familyState?.settledOutcome ?? null,
+        };
+        rows.set(rowKey, row);
+      } else if (row.toolCallId === null && association.toolCallId !== null) {
+        row.toolCallId = association.toolCallId;
+      }
+
+      if (association.outcome !== null) {
+        if (row.open) {
+          closeRow(row, association.outcome);
+          row.reopenable = false;
+          rememberDetachedRunFamilyState(context.threadId, row);
+        } else if (row.settledOutcome === "tracking-lost" && row.reopenable) {
+          emitLateTerminalCorrection(row, association.outcome);
+        } else {
+          row.settledOutcome = association.outcome;
+          row.reopenable = false;
+          rememberDetachedRunFamilyState(context.threadId, row);
+        }
+        continue;
+      }
+
+      if (
+        association.eligible &&
+        row.reopenable &&
+        !row.open &&
+        row.toolCallId !== null
+      ) {
+        nextDetachedRunProviderItemId(context.threadId, row);
+        row.settledOutcome = null;
+        const item = detachedRunTaskShape(row, null);
+        deltas.push({
+          kind: "item.open",
+          key: detachedRunKey(row.providerItemId, row.toolCallId),
+          item,
+          attach: "currentOrLast",
+        });
+        row.open = true;
+        rememberDetachedRunFamilyState(context.threadId, row);
+      }
+    }
+
+    for (const [rowKey, row] of rows) {
+      if (
+        row.sessionSerial === sessionSerial &&
+        row.open &&
+        !seenRowKeys.has(rowKey)
+      ) {
+        closeRow(row, "tracking-lost");
+      }
+    }
+
+    while (rows.size > MAX_DETACHED_RUN_ROWS) {
+      const evictable = [...rows].find(([, candidate]) => !candidate.open);
+      if (evictable === undefined) break;
+      rows.delete(evictable[0]);
+    }
+    return deltas;
   }
 
   function translate(
@@ -1194,7 +1599,7 @@ export function createPiDeltaTranslator(
     }
   }
 
-  return { translate, resetThread };
+  return { translate, resetThread, translateDetachedRunLifecycle };
 }
 
 function findLastAssistantMessage(

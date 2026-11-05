@@ -10,6 +10,7 @@ import { RuntimeBackgroundWorkState } from "./runtime-background-work-state.js";
 interface TaskOptions {
   skipTranscript?: boolean;
   status?: ThreadEventBackgroundTaskItem["status"];
+  taskStatus?: ThreadEventBackgroundTaskItem["taskStatus"];
   taskType?: string;
 }
 
@@ -23,7 +24,9 @@ function task(
     taskType: options.taskType ?? "local_workflow",
     description: `task ${id}`,
     status: options.status ?? "pending",
-    taskStatus: options.status === undefined ? "running" : "completed",
+    taskStatus:
+      options.taskStatus ??
+      (options.status === undefined ? "running" : "completed"),
     skipTranscript: options.skipTranscript ?? false,
     foreground: false,
   };
@@ -163,6 +166,23 @@ describe("RuntimeBackgroundWorkState", () => {
     expect(state.hasOpenWork()).toBe(true);
 
     state.observe(taskCompleted("task-2"));
+    expect(state.hasOpenWork()).toBe(false);
+  });
+
+  it("does not retain runtime work for a paused settled task", () => {
+    const state = new RuntimeBackgroundWorkState();
+    state.observe(taskStarted("task-1"));
+    expect(state.hasOpenThreadWork("t1")).toBe(true);
+
+    state.observe({
+      type: "item/backgroundTask/completed",
+      threadId: "t1",
+      providerThreadId: "p1",
+      scope: threadScope(),
+      item: task("task-1", { status: "interrupted", taskStatus: "paused" }),
+    });
+
+    expect(state.hasOpenThreadWork("t1")).toBe(false);
     expect(state.hasOpenWork()).toBe(false);
   });
 

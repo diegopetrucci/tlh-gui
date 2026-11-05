@@ -758,10 +758,9 @@ describe("background task timeline projection", () => {
       },
       2,
     );
-    const whileForeground = buildTimeline(
-      [turnStarted("turn-1", 1), started],
-      { includeNestedRows: false },
-    );
+    const whileForeground = buildTimeline([turnStarted("turn-1", 1), started], {
+      includeNestedRows: false,
+    });
     expect(whileForeground.activeBackgroundCommands).toEqual([]);
 
     const afterBackgrounding = buildTimeline(
@@ -1197,5 +1196,108 @@ describe("background task timeline projection", () => {
 
     expect(findWorkflowRows(timeline.rows)).toHaveLength(0);
     expect(timeline.activeWorkflows).toHaveLength(0);
+  });
+
+  it("projects a TLH local_subagent lifecycle into one visible row", () => {
+    const item = {
+      type: "backgroundTask" as const,
+      id: "pi:detached:run-1:g1",
+      familyId: "pi:detached:run-1",
+      taskType: "local_subagent",
+      description: "TLH detached subagent run",
+      status: "pending" as const,
+      taskStatus: "running" as const,
+      skipTranscript: false,
+      foreground: false,
+    };
+    const rows = buildTimelineRows([
+      turnStarted("turn-1", 1),
+      withMeta(
+        {
+          type: "item/started",
+          threadId: "thread-1",
+          providerThreadId: "provider-1",
+          scope: turnScope("turn-1"),
+          item,
+        },
+        2,
+      ),
+      withMeta(
+        {
+          type: "item/backgroundTask/completed",
+          threadId: "thread-1",
+          providerThreadId: "provider-1",
+          scope: threadScope(),
+          item: {
+            ...item,
+            status: "failed",
+            taskStatus: "failed",
+            error: "Tracking lost; the TLH run may still be running.",
+          },
+        },
+        3,
+      ),
+      turnCompleted("turn-1", 4),
+    ]);
+    const workflowRows = findWorkflowRows(rows);
+    expect(workflowRows).toHaveLength(1);
+    expect(workflowRows[0]).toMatchObject({
+      itemId: "pi:detached:run-1:g1",
+      taskType: "local_subagent",
+      status: "error",
+      taskStatus: "failed",
+      error: "Tracking lost; the TLH run may still be running.",
+    });
+  });
+
+  it("does not project a paused TLH local_subagent as active work", () => {
+    const item = {
+      type: "backgroundTask" as const,
+      id: "pi:detached:run-paused:g1",
+      familyId: "pi:detached:run-paused",
+      taskType: "local_subagent",
+      description: "TLH detached subagent run",
+      status: "pending" as const,
+      taskStatus: "running" as const,
+      skipTranscript: false,
+      foreground: false,
+    };
+    const timeline = buildTimeline([
+      turnStarted("turn-1", 1),
+      withMeta(
+        {
+          type: "item/started",
+          threadId: "thread-1",
+          providerThreadId: "provider-1",
+          scope: turnScope("turn-1"),
+          item,
+        },
+        2,
+      ),
+      withMeta(
+        {
+          type: "item/backgroundTask/completed",
+          threadId: "thread-1",
+          providerThreadId: "provider-1",
+          scope: threadScope(),
+          item: {
+            ...item,
+            status: "interrupted",
+            taskStatus: "paused" as const,
+            summary: "Detached subagent paused",
+          },
+        },
+        3,
+      ),
+    ]);
+    expect(timeline.activeBackgroundCommands).toEqual([]);
+    expect(findWorkflowRows(timeline.rows)).toMatchObject([
+      {
+        itemId: "pi:detached:run-paused:g1",
+        status: "interrupted",
+        taskStatus: "paused",
+        summary: "Detached subagent paused",
+      },
+    ]);
   });
 });

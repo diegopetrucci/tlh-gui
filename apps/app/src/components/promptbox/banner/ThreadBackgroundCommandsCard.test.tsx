@@ -125,7 +125,7 @@ describe("ThreadBackgroundCommandsCard", () => {
     ).not.toBeNull();
   });
 
-  it("summarizes and expands a single background agent in compact mode", () => {
+  it("summarizes and expands a single local subagent in compact mode", () => {
     const description = "Inspect mobile background banner";
 
     function CompactCard() {
@@ -140,7 +140,7 @@ describe("ThreadBackgroundCommandsCard", () => {
                 startedAt: 1,
                 status: "pending",
                 taskStatus: "running",
-                taskType: "local_agent",
+                taskType: "local_subagent",
                 workflowName: null,
               }),
             ]}

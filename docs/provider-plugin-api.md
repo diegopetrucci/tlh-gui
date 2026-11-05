@@ -301,6 +301,11 @@ webSearch · webFetch · imageView · imageGeneration · backgroundTask
 delegation · planSteps · compaction · tool
 ```
 
+TLH adapters that emit `backgroundTask` items follow the fork-owned [TLH
+background visibility contract](tlh/patch-inventory.md#tlh-background-visibility-contract).
+This generic vocabulary does not define provider-run identity, paused or
+tracking-loss semantics, or restart behavior.
+
 **Extension item kinds** — `"<pluginId>/<name>"`, declared in
 `extensionKinds` with an item schema, a state schema, or both, and validated
 at server ingest; a payload that fails validation persists as a

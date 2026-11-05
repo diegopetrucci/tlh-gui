@@ -27,6 +27,7 @@ import {
   scriptedEchoProcessEnv,
   waitForRuntimeState,
   waitForThreadAgentMessageText,
+  waitForThreadTurnCompleted,
   waitForThreadTurnStarted,
   withBridgeLaunch,
   type ScriptedEchoLaunchScript,
@@ -1144,6 +1145,113 @@ describe("createAgentRuntime process lifecycle", () => {
       await runtime.shutdown();
     }
   });
+
+  it.each([
+    {
+      label: "completed",
+      settlementInput: "bg_detached_done",
+      status: "completed",
+      taskStatus: "completed",
+    },
+    {
+      label: "paused",
+      settlementInput: "bg_detached_paused",
+      status: "interrupted",
+      taskStatus: "paused",
+    },
+    {
+      label: "tracking-lost",
+      settlementInput: "bg_detached_lost",
+      status: "failed",
+      taskStatus: "failed",
+    },
+  ] as const)(
+    "keeps an idle session for a detached row until it is $label",
+    async ({ settlementInput, status, taskStatus }) => {
+      const events: ThreadEvent[] = [];
+      const { processLog, runtime } = createCodexRuntime({ events });
+      try {
+        await runtime.startThread({
+          environmentId: "env-1",
+          threadId: "t-detached-retention",
+          projectId: "p1",
+          providerId: "codex",
+          options: fullRuntimeOptions,
+        });
+        await runtime.runTurn({
+          clientRequestId: "creq_222222226b",
+          threadId: "t-detached-retention",
+          input: [promptTextInput({ text: "bg_detached" })],
+          options: fullRuntimeOptions,
+        });
+        await waitForThreadTurnCompleted({
+          events,
+          providerId: "codex",
+          runtime,
+          threadId: "t-detached-retention",
+        });
+        const opened = events.find(
+          (event) =>
+            event.type === "item/started" &&
+            event.item.type === "backgroundTask",
+        );
+        expect(opened).toMatchObject({
+          type: "item/started",
+          item: {
+            id: expect.any(String),
+            familyId: expect.stringMatching(/^pi:detached:/u),
+            taskType: "local_subagent",
+            status: "pending",
+            taskStatus: "running",
+          },
+        });
+
+        const blocked = await runtime.reapIdleProviderSessions({
+          idleForMs: 0,
+          nowMs: Date.now() + 1,
+        });
+        expect(blocked.reapedSessions).toEqual([]);
+        expect(runtime.hasThread("t-detached-retention")).toBe(true);
+        expect(stoppedProcessPids(processLog.read())).toHaveLength(0);
+
+        events.splice(0, events.length);
+        await runtime.runTurn({
+          clientRequestId: "creq_222222226c",
+          threadId: "t-detached-retention",
+          input: [promptTextInput({ text: settlementInput })],
+          options: fullRuntimeOptions,
+        });
+        await waitForThreadTurnCompleted({
+          events,
+          providerId: "codex",
+          runtime,
+          threadId: "t-detached-retention",
+        });
+        expect(events).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              type: "item/backgroundTask/completed",
+              item: expect.objectContaining({ status, taskStatus }),
+            }),
+          ]),
+        );
+
+        const released = await runtime.reapIdleProviderSessions({
+          idleForMs: 0,
+          nowMs: Date.now() + 1,
+        });
+        expect(released.reapedSessions).toEqual([
+          expect.objectContaining({
+            providerId: "codex",
+            threadId: "t-detached-retention",
+          }),
+        ]);
+        expect(runtime.hasThread("t-detached-retention")).toBe(false);
+      } finally {
+        await runtime.shutdown();
+      }
+    },
+  );
 
   it("reaps a restorable non-Codex session", async () => {
     const events: ThreadEvent[] = [];
