@@ -495,4 +495,44 @@ describe("bb thread show command output", () => {
       pendingTodos: null,
     });
   });
+
+  it("bb thread show --json preserves the active background-agent count", async () => {
+    const thread = {
+      ...fixtures.makeThread({
+        id: "thread-json-background",
+        projectId: "proj-1",
+        providerId: "codex",
+        status: "idle",
+        createdAt: 1,
+        updatedAt: 2,
+      }),
+      activeBackgroundAgentCount: 1,
+      canRestoreEnvironment: false,
+      canEditMessages: true,
+      canSpawnChild: true,
+      queuedMessageCount: 0,
+    };
+    const get = vi.fn(async () => thread);
+    const timelineGet = fixtures.makeEmptyTimelineGetMock();
+    stubServerApi({
+      "v1.threads.:id.$get": get,
+      "v1.threads.:id.timeline.$get": timelineGet,
+    });
+
+    await runCommand(
+      ["thread", "show", "thread-json-background", "--json"],
+      register,
+    );
+
+    expect(
+      JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0])),
+    ).toMatchObject({
+      thread: {
+        id: "thread-json-background",
+        activeBackgroundAgentCount: 1,
+      },
+      environment: null,
+      pendingTodos: null,
+    });
+  });
 });

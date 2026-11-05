@@ -15,6 +15,7 @@ import {
 import {
   createPiDeltaTranslator,
   createPiModelContextWindowResolverFrom,
+  type PiDetachedRunAssociation,
   type PiModelContextWindowResolver,
 } from "./delta-translation.js";
 
@@ -53,6 +54,12 @@ interface PiTestContext {
 interface PiEquivalenceHarness {
   assembler: DeltaAssembler;
   translate(event: unknown, context?: PiTestContext): ThreadEvent[];
+  translateDetached(
+    associations:
+      | readonly PiDetachedRunAssociation[]
+      | PiDetachedRunAssociation,
+    options?: { cleanup?: boolean; sessionSerial?: number },
+  ): ThreadEvent[];
   openTurnId(): string;
 }
 
@@ -74,6 +81,19 @@ function createHarness(options?: {
       return assembler.assemble({
         threadId: context?.threadId ?? THREAD_ID,
         deltas: translator.translate(event, context),
+      });
+    },
+    translateDetached(associations, options) {
+      const entries = Array.isArray(associations)
+        ? associations
+        : [associations];
+      return assembler.assemble({
+        threadId: THREAD_ID,
+        deltas: translator.translateDetachedRunLifecycle(entries, {
+          threadId: THREAD_ID,
+          sessionSerial: options?.sessionSerial ?? 1,
+          cleanup: options?.cleanup,
+        }),
       });
     },
     openTurnId() {
@@ -2320,5 +2340,633 @@ describe("pi subagent delegation translation", () => {
     expect(open).not.toHaveProperty("presentation");
     expect(close).toMatchObject({ item: { type: "tool" } });
     expect(close).not.toHaveProperty("presentation");
+  });
+});
+
+function detachedAssociation(
+  asyncId: string,
+  overrides: Partial<PiDetachedRunAssociation> = {},
+): PiDetachedRunAssociation {
+  return {
+    candidate: { asyncId, mode: "single" },
+    toolCallId: `call-${asyncId}`,
+    eligible: true,
+    outcome: null,
+    ...overrides,
+  };
+}
+
+describe("pi detached background-task lifecycle translation", () => {
+  function openRootDelegation(
+    harness: PiEquivalenceHarness,
+    runId = "1",
+    startTurn = true,
+  ): string {
+    if (startTurn) harness.translate(loadFixture("agent-start.json"));
+    const events = harness.translate(
+      sdkMessage({
+        type: "tool_execution_start",
+        toolCallId: `call-run-${runId}`,
+        toolName: "subagent",
+        args: { agent: "reviewer", task: "Review the change" },
+      }),
+    );
+    const started = events.find((event) => event.type === "item/started");
+    if (!started || started.type !== "item/started") {
+      throw new Error("root subagent delegation did not open");
+    }
+    return started.item.id;
+  }
+
+  it("requires confirmed activity before emitting a detached row", () => {
+    const harness = createHarness();
+    openRootDelegation(harness);
+    expect(
+      harness.translateDetached(
+        detachedAssociation("run-unconfirmed", { eligible: false }),
+      ),
+    ).toEqual([]);
+    expect(
+      harness.translateDetached(detachedAssociation("run-unconfirmed")),
+    ).toMatchObject([
+      {
+        type: "item/started",
+        item: { type: "backgroundTask", taskType: "local_subagent" },
+      },
+    ]);
+  });
+
+  it("emits a visible row through the real assembler with the root parent", () => {
+    const harness = createHarness();
+    const rootId = openRootDelegation(harness);
+    harness.translate(
+      sdkMessage({
+        type: "tool_execution_end",
+        toolCallId: "call-run-1",
+        toolName: "subagent",
+        result: { content: [{ type: "text", text: "launched" }] },
+        isError: false,
+      }),
+    );
+
+    const events = harness.translateDetached(
+      detachedAssociation("run-1", { toolCallId: "call-run-1" }),
+    );
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      type: "item/started",
+      scope: turnScope(harness.openTurnId()),
+      item: {
+        type: "backgroundTask",
+        familyId: "pi:detached:run-1",
+        taskType: "local_subagent",
+        taskStatus: "running",
+        parentToolCallId: rootId,
+      },
+    });
+    expect(events[0]).not.toMatchObject({ type: "turn/started" });
+  });
+
+  it("attaches delayed confirmation to the current or last turn without fabricating one", () => {
+    const harness = createHarness();
+    openRootDelegation(harness);
+    harness.translate({
+      jsonrpc: "2.0",
+      method: "pi/prompt/settled",
+      params: { threadId: THREAD_ID, status: "completed" },
+    });
+    const first = harness.translateDetached(detachedAssociation("run-1"));
+    expect(first).toHaveLength(1);
+    expect(first[0]).toMatchObject({
+      type: "item/started",
+      scope: turnScope("pi-test-t1"),
+    });
+
+    harness.translate(loadFixture("agent-start.json"));
+    expect(harness.translateDetached(detachedAssociation("run-1"))).toEqual([]);
+    expect(harness.openTurnId()).toBe("pi-test-t2");
+  });
+
+  it("attaches a later detached run to the later parent turn", () => {
+    const harness = createHarness();
+    openRootDelegation(harness);
+    harness.translate({
+      jsonrpc: "2.0",
+      method: "pi/prompt/settled",
+      params: { threadId: THREAD_ID, status: "completed" },
+    });
+    harness.translate(loadFixture("agent-start.json"));
+    const rootId = openRootDelegation(harness, "2", false);
+    const events = harness.translateDetached(
+      detachedAssociation("run-2", { toolCallId: "call-run-2" }),
+    );
+    expect(events).toMatchObject([
+      {
+        type: "item/started",
+        scope: turnScope("pi-test-t2"),
+        item: { parentToolCallId: rootId },
+      },
+    ]);
+  });
+
+  it("closes confirmed outcomes, pauses explicitly, and reports loss without cancellation", () => {
+    const harness = createHarness();
+    openRootDelegation(harness);
+    const opened = harness.translateDetached(detachedAssociation("run-1"));
+    const itemId = opened[0]?.type === "item/started" ? opened[0].item.id : "";
+
+    const paused = harness.translateDetached(
+      detachedAssociation("run-1", {
+        eligible: false,
+        outcome: "paused",
+      }),
+    );
+    expect(paused).toMatchObject([
+      {
+        type: "item/backgroundTask/completed",
+        scope: threadScope(),
+        item: {
+          id: itemId,
+          status: "interrupted",
+          taskStatus: "paused",
+          summary: "Detached subagent paused",
+        },
+      },
+    ]);
+    expect(harness.translateDetached(detachedAssociation("run-1"))).toEqual([]);
+
+    const completedHarness = createHarness();
+    openRootDelegation(completedHarness);
+    completedHarness.translateDetached(detachedAssociation("run-3"));
+    expect(
+      completedHarness.translateDetached(
+        detachedAssociation("run-3", {
+          eligible: false,
+          outcome: "completed",
+        }),
+      ),
+    ).toMatchObject([
+      {
+        type: "item/backgroundTask/completed",
+        item: {
+          status: "completed",
+          taskStatus: "completed",
+          summary: "Detached subagent completed",
+        },
+      },
+    ]);
+
+    const lossHarness = createHarness();
+    openRootDelegation(lossHarness);
+    lossHarness.translateDetached(detachedAssociation("run-2"));
+    const lost = lossHarness.translateDetached([]);
+    expect(lost).toMatchObject([
+      {
+        type: "item/backgroundTask/completed",
+        item: {
+          status: "failed",
+          taskStatus: "failed",
+          error: "Tracking lost; the TLH run may still be running.",
+        },
+      },
+    ]);
+  });
+
+  it("opens parallel runs once and uses a fresh provider generation after loss", () => {
+    const harness = createHarness();
+    openRootDelegation(harness);
+    const first = harness.translateDetached([
+      detachedAssociation("run-a", { toolCallId: "call-run-1" }),
+      detachedAssociation("run-b", {
+        candidate: { asyncId: "run-b", mode: "parallel" },
+        toolCallId: "call-run-1",
+      }),
+    ]);
+    expect(first).toHaveLength(2);
+    const firstItems = first.filter(
+      (event): event is Extract<ThreadEvent, { type: "item/started" }> =>
+        event.type === "item/started" && event.item.type === "backgroundTask",
+    );
+    expect(new Set(firstItems.map((event) => event.item.id)).size).toBe(2);
+    expect(
+      harness.translateDetached([
+        detachedAssociation("run-a", { toolCallId: "call-run-1" }),
+        detachedAssociation("run-b", {
+          candidate: { asyncId: "run-b", mode: "parallel" },
+          toolCallId: "call-run-1",
+        }),
+      ]),
+    ).toEqual([]);
+
+    const lost = harness.translateDetached([
+      detachedAssociation("run-b", {
+        candidate: { asyncId: "run-b", mode: "parallel" },
+        toolCallId: "call-run-1",
+      }),
+    ]);
+    expect(lost).toHaveLength(1);
+    const reopened = harness.translateDetached([
+      detachedAssociation("run-a"),
+      detachedAssociation("run-b", {
+        candidate: { asyncId: "run-b", mode: "parallel" },
+        toolCallId: "call-run-1",
+      }),
+    ]);
+    expect(reopened).toHaveLength(1);
+    expect(reopened[0]).toMatchObject({
+      type: "item/started",
+      item: {
+        type: "backgroundTask",
+        familyId: "pi:detached:run-a",
+        parentToolCallId: expect.any(String),
+      },
+    });
+    expect(reopened[0]).not.toMatchObject({
+      item: {
+        id: firstItems.find((event) => event.item.parentToolCallId)?.item.id,
+      },
+    });
+  });
+
+  it("does not materialize a terminal run that arrived before its candidate", () => {
+    const harness = createHarness();
+    openRootDelegation(harness);
+    expect(
+      harness.translateDetached(
+        detachedAssociation("run-terminal", {
+          eligible: false,
+          outcome: "completed",
+        }),
+      ),
+    ).toEqual([]);
+    expect(
+      harness.translateDetached(
+        detachedAssociation("run-terminal", { outcome: "completed" }),
+      ),
+    ).toEqual([]);
+  });
+
+  it("settles a late terminal outcome with a fresh item generation", () => {
+    const harness = createHarness();
+    openRootDelegation(harness);
+    const opened = harness.translateDetached(
+      detachedAssociation("run-late", { toolCallId: "call-run-late" }),
+    );
+    const initialId =
+      opened[0]?.type === "item/started" ? opened[0].item.id : "";
+
+    expect(harness.translateDetached([])).toMatchObject([
+      {
+        type: "item/backgroundTask/completed",
+        item: {
+          id: initialId,
+          status: "failed",
+          taskStatus: "failed",
+        },
+      },
+    ]);
+
+    const corrected = harness.translateDetached(
+      detachedAssociation("run-late", {
+        eligible: false,
+        outcome: "completed",
+        toolCallId: "call-run-late",
+      }),
+    );
+    expect(corrected).toMatchObject([
+      {
+        type: "item/backgroundTask/completed",
+        item: {
+          status: "completed",
+          taskStatus: "completed",
+          summary: "Detached subagent completed",
+        },
+      },
+    ]);
+    const correctedId =
+      corrected[0]?.type === "item/backgroundTask/completed"
+        ? corrected[0].item.id
+        : "";
+    expect(correctedId).not.toBe(initialId);
+    expect(
+      harness.translateDetached(
+        detachedAssociation("run-late", {
+          eligible: true,
+          outcome: "completed",
+          toolCallId: "call-run-late",
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  it("keeps item generations unique after evicting more than 1024 rows", () => {
+    const harness = createHarness();
+    openRootDelegation(harness);
+    const initial = harness.translateDetached([
+      detachedAssociation("run-evicted", { toolCallId: "call-run-evicted" }),
+      detachedAssociation("run-late-evicted", {
+        toolCallId: "call-run-late-evicted",
+      }),
+    ]);
+    const initialId =
+      initial.find(
+        (event): event is Extract<ThreadEvent, { type: "item/started" }> =>
+          event.type === "item/started" &&
+          event.item.type === "backgroundTask" &&
+          event.item.familyId === "pi:detached:run-evicted",
+      )?.item.id ?? "";
+    const lateInitialId =
+      initial.find(
+        (event): event is Extract<ThreadEvent, { type: "item/started" }> =>
+          event.type === "item/started" &&
+          event.item.type === "backgroundTask" &&
+          event.item.familyId === "pi:detached:run-late-evicted",
+      )?.item.id ?? "";
+    harness.translateDetached([]);
+
+    for (let index = 1; index <= 1024; index += 1) {
+      harness.translateDetached([
+        detachedAssociation(`run-${index}`, {
+          toolCallId: `call-run-${index}`,
+        }),
+      ]);
+    }
+
+    const reopened = harness.translateDetached(
+      detachedAssociation("run-evicted", { toolCallId: "call-run-evicted" }),
+    );
+    const reopenedItem = reopened.find(
+      (event): event is Extract<ThreadEvent, { type: "item/started" }> =>
+        event.type === "item/started" &&
+        event.item.type === "backgroundTask" &&
+        event.item.familyId === "pi:detached:run-evicted",
+    );
+    expect(reopenedItem?.item.id).toBeDefined();
+    expect(reopenedItem?.item.id).not.toBe(initialId);
+
+    const lateCorrection = harness.translateDetached(
+      detachedAssociation("run-late-evicted", {
+        eligible: false,
+        outcome: "completed",
+        toolCallId: "call-run-late-evicted",
+      }),
+    );
+    const correctedItem = lateCorrection.find(
+      (
+        event,
+      ): event is Extract<
+        ThreadEvent,
+        { type: "item/backgroundTask/completed" }
+      > =>
+        event.type === "item/backgroundTask/completed" &&
+        event.item.familyId === "pi:detached:run-late-evicted",
+    );
+    expect(correctedItem).toMatchObject({
+      item: {
+        status: "completed",
+        taskStatus: "completed",
+      },
+    });
+    expect(correctedItem?.item.id).not.toBe(lateInitialId);
+  });
+
+  it("corrects an evicted lost row from cleanup family state", () => {
+    const harness = createHarness();
+    openRootDelegation(harness);
+    const opened = harness.translateDetached(
+      detachedAssociation("run-cleanup-evicted", {
+        toolCallId: "call-run-cleanup-evicted",
+      }),
+    );
+    const initialId =
+      opened[0]?.type === "item/started" ? opened[0].item.id : "";
+    harness.translateDetached([]);
+
+    for (let index = 1; index <= 1024; index += 1) {
+      harness.translateDetached([
+        detachedAssociation(`cleanup-run-${index}`, {
+          toolCallId: `call-cleanup-run-${index}`,
+        }),
+      ]);
+    }
+
+    const corrected = harness.translateDetached(
+      [
+        detachedAssociation("run-cleanup-evicted", {
+          eligible: false,
+          outcome: "completed",
+          toolCallId: "call-run-cleanup-evicted",
+        }),
+      ],
+      { cleanup: true },
+    );
+    const correctedItem = corrected.find(
+      (
+        event,
+      ): event is Extract<
+        ThreadEvent,
+        { type: "item/backgroundTask/completed" }
+      > =>
+        event.type === "item/backgroundTask/completed" &&
+        event.item.familyId === "pi:detached:run-cleanup-evicted",
+    );
+    expect(correctedItem).toMatchObject({
+      item: {
+        status: "completed",
+        taskStatus: "completed",
+        summary: "Detached subagent completed",
+      },
+    });
+    expect(correctedItem?.item.id).not.toBe(initialId);
+    expect(
+      harness.translateDetached(
+        [
+          detachedAssociation("run-cleanup-evicted", {
+            outcome: "completed",
+            toolCallId: "call-run-cleanup-evicted",
+          }),
+        ],
+        { cleanup: true },
+      ),
+    ).toEqual([]);
+  });
+
+  it("closes active rows as tracking lost during cleanup, without reopening them", () => {
+    const harness = createHarness();
+    openRootDelegation(harness);
+    harness.translateDetached(detachedAssociation("run-cleanup"));
+    const events = harness.translateDetached([], { cleanup: true });
+    expect(events).toMatchObject([
+      {
+        type: "item/backgroundTask/completed",
+        item: {
+          taskStatus: "failed",
+          error: "Tracking lost; the TLH run may still be running.",
+        },
+      },
+    ]);
+    expect(
+      harness.translateDetached(detachedAssociation("run-cleanup")),
+    ).toEqual([]);
+  });
+
+  it("applies cleanup outcomes before loss and keeps cleanup idempotent", () => {
+    const harness = createHarness();
+    openRootDelegation(harness);
+    harness.translateDetached([
+      detachedAssociation("run-completed"),
+      detachedAssociation("run-paused"),
+      detachedAssociation("run-unresolved"),
+    ]);
+
+    const cleanup = harness.translateDetached(
+      [
+        detachedAssociation("run-completed", {
+          eligible: false,
+          outcome: "completed",
+        }),
+        detachedAssociation("run-paused", {
+          eligible: false,
+          outcome: "paused",
+        }),
+        detachedAssociation("run-unresolved", { eligible: false }),
+      ],
+      { cleanup: true },
+    );
+    expect(cleanup).toMatchObject([
+      {
+        type: "item/backgroundTask/completed",
+        item: { status: "completed", taskStatus: "completed" },
+      },
+      {
+        type: "item/backgroundTask/completed",
+        item: { status: "interrupted", taskStatus: "paused" },
+      },
+      {
+        type: "item/backgroundTask/completed",
+        item: {
+          status: "failed",
+          taskStatus: "failed",
+          error: "Tracking lost; the TLH run may still be running.",
+        },
+      },
+    ]);
+    expect(
+      harness.translateDetached(
+        [
+          detachedAssociation("run-completed", { outcome: "completed" }),
+          detachedAssociation("run-paused", { outcome: "paused" }),
+          detachedAssociation("run-unresolved"),
+        ],
+        { cleanup: true },
+      ),
+    ).toEqual([]);
+  });
+
+  it("corrects a previously lost row during cleanup with a fresh generation", () => {
+    const harness = createHarness();
+    openRootDelegation(harness);
+    const opened = harness.translateDetached(
+      detachedAssociation("run-cleanup-late"),
+    );
+    const initialId =
+      opened[0]?.type === "item/started" ? opened[0].item.id : "";
+    const lost = harness.translateDetached([]);
+    const lostId =
+      lost[0]?.type === "item/backgroundTask/completed" ? lost[0].item.id : "";
+    expect(lostId).toBe(initialId);
+
+    const corrected = harness.translateDetached(
+      [
+        detachedAssociation("run-cleanup-late", {
+          eligible: false,
+          outcome: "completed",
+        }),
+      ],
+      { cleanup: true },
+    );
+    expect(corrected).toMatchObject([
+      {
+        type: "item/backgroundTask/completed",
+        item: {
+          status: "completed",
+          taskStatus: "completed",
+          summary: "Detached subagent completed",
+        },
+      },
+    ]);
+    const correctedId =
+      corrected[0]?.type === "item/backgroundTask/completed"
+        ? corrected[0].item.id
+        : "";
+    expect(correctedId).not.toBe(lostId);
+    expect(
+      harness.translateDetached(
+        [detachedAssociation("run-cleanup-late", { outcome: "completed" })],
+        { cleanup: true },
+      ),
+    ).toEqual([]);
+  });
+
+  it("scopes cleanup and late signals to the originating session", () => {
+    const harness = createHarness();
+    openRootDelegation(harness);
+    const oldStarted = harness.translateDetached(
+      detachedAssociation("run-shared"),
+      { sessionSerial: 1 },
+    );
+    const replacementStarted = harness.translateDetached(
+      detachedAssociation("run-shared"),
+      { sessionSerial: 2 },
+    );
+    const oldId =
+      oldStarted[0]?.type === "item/started" ? oldStarted[0].item.id : "";
+    const replacementId =
+      replacementStarted[0]?.type === "item/started"
+        ? replacementStarted[0].item.id
+        : "";
+    expect(replacementId).not.toBe(oldId);
+
+    const oldCleanup = harness.translateDetached([], {
+      cleanup: true,
+      sessionSerial: 1,
+    });
+    expect(oldCleanup).toMatchObject([
+      {
+        type: "item/backgroundTask/completed",
+        item: {
+          id: oldId,
+          error: "Tracking lost; the TLH run may still be running.",
+        },
+      },
+    ]);
+    expect(
+      harness.translateDetached(
+        detachedAssociation("run-shared", {
+          eligible: false,
+          outcome: "completed",
+        }),
+        { sessionSerial: 1 },
+      ),
+    ).toEqual([]);
+    expect(
+      harness.translateDetached(detachedAssociation("run-shared"), {
+        sessionSerial: 2,
+      }),
+    ).toEqual([]);
+    expect(
+      harness.translateDetached(
+        detachedAssociation("run-shared", {
+          eligible: false,
+          outcome: "completed",
+        }),
+        { sessionSerial: 2 },
+      ),
+    ).toMatchObject([
+      {
+        type: "item/backgroundTask/completed",
+        item: { id: replacementId, status: "completed" },
+      },
+    ]);
   });
 });

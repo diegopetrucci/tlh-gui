@@ -179,6 +179,75 @@ export default function bbExtension(pi) {
   let sessionContext = null;
   let runId = 0;
   let lastSettlement = null;
+  let detachedEventUnsubscribers = [];
+
+  function isRecord(value) {
+    return value && typeof value === "object" && !Array.isArray(value);
+  }
+
+  function nonEmptyString(value) {
+    if (typeof value !== "string") return null;
+    const trimmed = value.trim();
+    return trimmed ? trimmed : null;
+  }
+
+  function forwardEffectiveActivity(value) {
+    if (!isRecord(value) || !Array.isArray(value.activeAsyncJobIds)) return;
+    const activeAsyncJobIds = value.activeAsyncJobIds.map(nonEmptyString);
+    if (activeAsyncJobIds.some((id) => id === null)) return;
+    writeLine(CHILD_TO_BRIDGE_FD, {
+      kind: "tlh:effective-activity",
+      activeAsyncJobIds,
+    });
+  }
+
+  function forwardAsyncComplete(value) {
+    if (!isRecord(value)) return;
+    const state = nonEmptyString(value.state);
+    const runId = nonEmptyString(value.runId);
+    const id = runId === null ? nonEmptyString(value.id) : null;
+    if (state === null || (runId === null && id === null)) return;
+    writeLine(CHILD_TO_BRIDGE_FD, {
+      kind: "subagent:async-complete",
+      ...(runId === null ? { id } : { runId }),
+      state,
+    });
+  }
+
+  function clearDetachedEventSubscriptions() {
+    for (const unsubscribe of detachedEventUnsubscribers) {
+      try {
+        unsubscribe();
+      } catch {}
+    }
+    detachedEventUnsubscribers = [];
+  }
+
+  function installDetachedEventSubscriptions() {
+    clearDetachedEventSubscriptions();
+    try {
+      const events = pi.events;
+      if (!events || typeof events.on !== "function") return;
+      const activityUnsubscribe = events.on(
+        "tlh:effective-activity",
+        forwardEffectiveActivity,
+      );
+      const completionUnsubscribe = events.on(
+        "subagent:async-complete",
+        forwardAsyncComplete,
+      );
+      if (typeof activityUnsubscribe === "function") {
+        detachedEventUnsubscribers.push(activityUnsubscribe);
+      }
+      if (typeof completionUnsubscribe === "function") {
+        detachedEventUnsubscribers.push(completionUnsubscribe);
+      }
+    } catch {
+      clearDetachedEventSubscriptions();
+    }
+  }
+
+  installDetachedEventSubscriptions();
 
   const onBridgeLine = (line) => {
     const trimmed = line.trim();
@@ -353,6 +422,7 @@ export default function bbExtension(pi) {
 
   pi.on("session_start", async (_event, ctx) => {
     sessionContext = ctx;
+    installDetachedEventSubscriptions();
     writeLine(CHILD_TO_BRIDGE_FD, {
       kind: "model-scope",
       ...currentModelScope(),
@@ -371,6 +441,11 @@ export default function bbExtension(pi) {
       if (missing) pi.setActiveTools([...active]);
     }
     writeLine(CHILD_TO_BRIDGE_FD, { kind: "ready", agentSettled: supportsAgentSettlement(PiRuntime.VERSION) });
+  });
+
+  pi.on("session_shutdown", () => {
+    sessionContext = null;
+    clearDetachedEventSubscriptions();
   });
 
   pi.on("agent_start", (_event, ctx) => {

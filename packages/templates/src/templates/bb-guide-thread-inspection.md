@@ -100,6 +100,13 @@ Inspecting:
   walks a consistent history snapshot and joins paginated group contents.
   Appends stay outside that walk; rerun the command if a history edit invalidates it.
 
+  TLH background runs appear in `thread log` as workflow rows; a run may fan
+  out to parallel work. See the [TLH background visibility contract](https://github.com/diegopetrucci/tlh-gui/blob/main/docs/tlh/patch-inventory.md#tlh-background-visibility-contract)
+  for run identity, paused/tracking-loss behavior, edit refusal, and deferred
+  limits. In `thread show --json`, the CLI owns
+  `.thread.activeBackgroundAgentCount`: while active, each confirmed TLH run
+  contributes one `ACTIVE` count, even with parallel children; children are not counted.
+
   bb thread output [id]                    Get the final output of a thread
     --self                                 Target current thread
 

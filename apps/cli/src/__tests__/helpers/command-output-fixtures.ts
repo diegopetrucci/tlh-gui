@@ -108,6 +108,34 @@ export function makePendingSteerTimelineRow(): TimelineUserConversationRow {
   };
 }
 
+export function makeBackgroundAgentTimelineRow(
+  overrides: Partial<
+    Extract<TimelineRow, { kind: "work"; workKind: "workflow" }>
+  > = {},
+): Extract<TimelineRow, { kind: "work"; workKind: "workflow" }> {
+  return {
+    ...makeTimelineBase({
+      id: "background-agent-run-1",
+      sourceSeqStart: 42,
+    }),
+    kind: "work",
+    workKind: "workflow",
+    status: "pending",
+    itemId: "background-agent-run-1",
+    taskType: "local_subagent",
+    workflowName: null,
+    description: "Inspect deterministic background fixture",
+    model: "haiku",
+    taskStatus: "running",
+    workflow: null,
+    usage: null,
+    summary: null,
+    error: null,
+    completedAt: null,
+    ...overrides,
+  };
+}
+
 export function makeThread(overrides: MakeThreadArgs): Thread {
   return {
     status: "idle",

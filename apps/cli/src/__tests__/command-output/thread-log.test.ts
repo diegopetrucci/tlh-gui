@@ -62,6 +62,34 @@ describe("bb thread log command output", () => {
     expect(getEvents).not.toHaveBeenCalled();
   });
 
+  it("bb thread log renders one row for one running background-agent run", async () => {
+    const description = "Inspect deterministic background fixture";
+    const getEvents = vi.fn(async () => []);
+    const getTimeline = vi.fn(async () =>
+      fixtures.makeTimelineResponse([
+        fixtures.makeBackgroundAgentTimelineRow({ description }),
+      ]),
+    );
+    stubServerApi({
+      "v1.threads.:id.events.$get": getEvents,
+      "v1.threads.:id.timeline.$get": getTimeline,
+    });
+
+    await runCommand(
+      ["thread", "log", "thread-log", "--format", "verbose"],
+      register,
+    );
+
+    const output = String(vi.mocked(console.log).mock.calls[0]?.[0]);
+    expect(output).toContain(`Running background agent: ${description}`);
+    expect(output.match(new RegExp(description, "gu"))).toHaveLength(1);
+    expect(getTimeline).toHaveBeenCalledWith({
+      param: { id: "thread-log" },
+      query: { includeNestedRows: "true" },
+    });
+    expect(getEvents).not.toHaveBeenCalled();
+  });
+
   it("bb thread log renders approval state on command and file-change rows", async () => {
     const getEvents = vi.fn(async () => []);
     const getTimeline = vi.fn(async () =>

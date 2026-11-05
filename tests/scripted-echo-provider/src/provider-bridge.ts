@@ -184,7 +184,7 @@ const archivedSessionIds = new Set<string>();
 const scriptedFailureCounts = new Map<number, number>();
 const openBackgroundTasks = new Map<
   string,
-  { providerItemId: string; familyId: string }[]
+  { providerItemId: string; familyId: string; kind: BackgroundTaskKind }[]
 >();
 let discardFailed = false;
 let providerThreadCounter = 0;
@@ -240,6 +240,9 @@ const APPROVAL_KINDS: readonly ApprovalKind[] = [
   "plan",
 ];
 
+type BackgroundTaskKind = "workflow" | "detached";
+type BackgroundTaskSettlement = "completed" | "paused" | "tracking-lost";
+
 interface TurnPlan {
   approvalKind: ApprovalKind | null;
   delayMs: number;
@@ -251,8 +254,8 @@ interface TurnPlan {
   failure: { text: string; beforeTurn: boolean } | null;
   recoverKind: ProviderRecoveryHint["kind"] | null;
   recoverNowKind: ProviderRecoveryHint["kind"] | null;
-  backgroundTask: boolean;
-  settleBackgroundTasks: boolean;
+  backgroundTask: BackgroundTaskKind | null;
+  settleBackgroundTasks: BackgroundTaskSettlement | null;
 }
 
 function promptText(input: readonly PromptInput[]): string {
@@ -290,11 +293,27 @@ function parseTurnPlan(inputText: string): TurnPlan {
   const recoverNowKind = providerRecoveryKindSchema.safeParse(
     recoverNowMatch?.[1],
   );
+  const hasDetachedBackgroundTask = /(?:^|\s)bg_detached(?:\s|$)/u.test(
+    inputText,
+  );
+  const hasWorkflowBackgroundTask = /(?:^|\s)bg_task(?:\s|$)/u.test(inputText);
+  const backgroundTaskSettlement =
+    /(?:^|\s)bg_(?:task|detached)_done(?:\s|$)/u.test(inputText)
+      ? "completed"
+      : /(?:^|\s)bg_detached_paused(?:\s|$)/u.test(inputText)
+        ? "paused"
+        : /(?:^|\s)bg_detached_lost(?:\s|$)/u.test(inputText)
+          ? "tracking-lost"
+          : null;
   return {
     recoverKind: recoverKind.success ? recoverKind.data : null,
     recoverNowKind: recoverNowKind.success ? recoverNowKind.data : null,
-    backgroundTask: /(?:^|\s)bg_task(?:\s|$)/u.test(inputText),
-    settleBackgroundTasks: /(?:^|\s)bg_task_done(?:\s|$)/u.test(inputText),
+    backgroundTask: hasDetachedBackgroundTask
+      ? "detached"
+      : hasWorkflowBackgroundTask
+        ? "workflow"
+        : null,
+    settleBackgroundTasks: backgroundTaskSettlement,
     approvalKind,
     delayMs: delayMatch?.[1] === undefined ? 0 : Number(delayMatch[1]),
     questionRequested: questionMatch !== null,
@@ -457,9 +476,23 @@ function completeTurn(
   emitDeltas(session.threadId, deltas);
 }
 
-function openBackgroundTask(session: Session, providerTurnId: string): void {
-  const providerItemId = `bg-${session.turnCount}`;
-  const familyId = `bg-family-${session.threadId}-${session.turnCount}`;
+function openBackgroundTask(
+  session: Session,
+  providerTurnId: string,
+  kind: BackgroundTaskKind,
+): void {
+  const detached = kind === "detached";
+  const asyncId = `scripted:${session.threadId}:${session.turnCount}`;
+  const familyId = detached
+    ? `pi:detached:${encodeURIComponent(asyncId)}`
+    : `bg-family-${session.threadId}-${session.turnCount}`;
+  const providerItemId = detached
+    ? `${familyId}:g1`
+    : `bg-${session.turnCount}`;
+  const taskType = detached ? "local_subagent" : "workflow";
+  const description = detached
+    ? "TLH detached subagent run"
+    : "scripted background task";
   emitDeltas(session.threadId, [
     {
       kind: "item.open",
@@ -467,8 +500,8 @@ function openBackgroundTask(session: Session, providerTurnId: string): void {
       item: {
         type: "backgroundTask",
         familyId,
-        taskType: "workflow",
-        description: "scripted background task",
+        taskType,
+        description,
         status: "pending",
         taskStatus: "running",
         skipTranscript: false,
@@ -478,31 +511,73 @@ function openBackgroundTask(session: Session, providerTurnId: string): void {
     },
   ]);
   const open = openBackgroundTasks.get(session.threadId) ?? [];
-  open.push({ providerItemId, familyId });
+  open.push({ providerItemId, familyId, kind });
   openBackgroundTasks.set(session.threadId, open);
   logProcessStep(`bg_task/open:${process.pid}:${session.threadId}`);
 }
 
-function settleBackgroundTasks(session: Session): void {
+function settleBackgroundTasks(
+  session: Session,
+  settlement: BackgroundTaskSettlement = "completed",
+): void {
   const open = openBackgroundTasks.get(session.threadId) ?? [];
   openBackgroundTasks.delete(session.threadId);
   emitDeltas(
     session.threadId,
-    open.map((task) => ({
-      kind: "item.close",
-      key: { providerItemId: task.providerItemId },
-      status: "completed",
-      item: {
-        type: "backgroundTask",
+    open.map((task) => {
+      const detached = task.kind === "detached";
+      const taskType = detached ? "local_subagent" : "workflow";
+      const description = detached
+        ? "TLH detached subagent run"
+        : "scripted background task";
+      const baseItem = {
+        type: "backgroundTask" as const,
         familyId: task.familyId,
-        taskType: "workflow",
-        description: "scripted background task",
-        status: "completed",
-        taskStatus: "completed",
+        taskType,
+        description,
         skipTranscript: false,
         foreground: false,
-      },
-    })),
+      };
+      if (settlement === "paused") {
+        return {
+          kind: "item.close" as const,
+          key: { providerItemId: task.providerItemId },
+          status: "interrupted" as const,
+          item: {
+            ...baseItem,
+            status: "interrupted" as const,
+            taskStatus: "paused" as const,
+            summary: "Detached subagent paused",
+          },
+        };
+      }
+      if (settlement === "tracking-lost") {
+        return {
+          kind: "item.close" as const,
+          key: { providerItemId: task.providerItemId },
+          status: "failed" as const,
+          item: {
+            ...baseItem,
+            status: "failed" as const,
+            taskStatus: "failed" as const,
+            error: "Tracking lost; the TLH run may still be running.",
+          },
+        };
+      }
+      return {
+        kind: "item.close" as const,
+        key: { providerItemId: task.providerItemId },
+        status: "completed" as const,
+        item: {
+          ...baseItem,
+          status: "completed" as const,
+          taskStatus: "completed" as const,
+          summary: detached
+            ? "Detached subagent completed"
+            : "Scripted background task completed",
+        },
+      };
+    }),
   );
 }
 
@@ -578,11 +653,11 @@ function beginTurn(args: {
   deltas.push({ kind: "turn.open", providerTurnId });
   emitDeltas(session.threadId, deltas);
   emitRecoveryHint(session.threadId, plan.recoverNowKind);
-  if (plan.backgroundTask) {
-    openBackgroundTask(session, providerTurnId);
+  if (plan.backgroundTask !== null) {
+    openBackgroundTask(session, providerTurnId, plan.backgroundTask);
   }
-  if (plan.settleBackgroundTasks) {
-    settleBackgroundTasks(session);
+  if (plan.settleBackgroundTasks !== null) {
+    settleBackgroundTasks(session, plan.settleBackgroundTasks);
   }
 
   if (plan.holdTurn) {

@@ -4365,6 +4365,152 @@ describe("events", () => {
     });
   });
 
+  it("counts real TLH detached generations from zero through terminal release", () => {
+    const { db, thread } = setup();
+    let sequence = 0;
+
+    const familyId = (asyncId: string): string =>
+      `pi:detached:${encodeURIComponent(asyncId)}`;
+    const taskEvent = (args: {
+      asyncId: string;
+      generation: number;
+      mode?: "single" | "parallel";
+      type:
+        | "item/started"
+        | "item/backgroundTask/progress"
+        | "item/backgroundTask/completed";
+      status: "pending" | "completed" | "interrupted" | "failed";
+      taskStatus: "running" | "completed" | "paused" | "failed";
+      summary?: string;
+      error?: string;
+    }): void => {
+      const taskFamilyId = familyId(args.asyncId);
+      const itemId = `${taskFamilyId}:g${args.generation}`;
+      insertEvents(db, noopNotifier, [
+        {
+          threadId: thread.id,
+          sequence: ++sequence,
+          scope:
+            args.type === "item/started"
+              ? turnScope("turn-detached")
+              : threadScope(),
+          type: args.type,
+          itemId,
+          itemKind: "backgroundTask",
+          parentToolCallId: "root-subagent-call",
+          data: JSON.stringify({
+            item: {
+              id: itemId,
+              type: "backgroundTask",
+              familyId: taskFamilyId,
+              taskType: LOCAL_SUBAGENT_TASK_TYPE,
+              description:
+                args.mode === "parallel"
+                  ? "TLH detached parallel subagent run"
+                  : "TLH detached subagent run",
+              status: args.status,
+              taskStatus: args.taskStatus,
+              skipTranscript: false,
+              foreground: false,
+              ...(args.summary === undefined ? {} : { summary: args.summary }),
+              ...(args.error === undefined ? {} : { error: args.error }),
+            },
+          }),
+        },
+      ]);
+    };
+    const activeCount = (): number =>
+      listActiveBackgroundTaskCountsByThreadIds(db, {
+        threadIds: [thread.id],
+      })[0]?.activeBackgroundAgentCount ?? 0;
+
+    expect(activeCount()).toBe(0);
+
+    taskEvent({
+      asyncId: "parallel:one",
+      generation: 1,
+      mode: "parallel",
+      type: "item/started",
+      status: "pending",
+      taskStatus: "running",
+    });
+    taskEvent({
+      asyncId: "parallel:one",
+      generation: 1,
+      mode: "parallel",
+      type: "item/backgroundTask/progress",
+      status: "pending",
+      taskStatus: "running",
+    });
+    expect(activeCount()).toBe(1);
+
+    taskEvent({
+      asyncId: "concurrent:two",
+      generation: 1,
+      type: "item/started",
+      status: "pending",
+      taskStatus: "running",
+    });
+    expect(activeCount()).toBe(2);
+
+    taskEvent({
+      asyncId: "parallel:one",
+      generation: 1,
+      mode: "parallel",
+      type: "item/backgroundTask/completed",
+      status: "completed",
+      taskStatus: "completed",
+      summary: "Detached subagent completed",
+    });
+    expect(activeCount()).toBe(1);
+
+    taskEvent({
+      asyncId: "concurrent:two",
+      generation: 1,
+      type: "item/backgroundTask/completed",
+      status: "interrupted",
+      taskStatus: "paused",
+      summary: "Detached subagent paused",
+    });
+    expect(activeCount()).toBe(0);
+
+    taskEvent({
+      asyncId: "lost-run",
+      generation: 1,
+      type: "item/started",
+      status: "pending",
+      taskStatus: "running",
+    });
+    expect(activeCount()).toBe(1);
+    taskEvent({
+      asyncId: "lost-run",
+      generation: 1,
+      type: "item/backgroundTask/completed",
+      status: "failed",
+      taskStatus: "failed",
+      error: "Tracking lost; the TLH run may still be running.",
+    });
+    expect(activeCount()).toBe(0);
+
+    taskEvent({
+      asyncId: "lost-run",
+      generation: 2,
+      type: "item/started",
+      status: "pending",
+      taskStatus: "running",
+    });
+    expect(activeCount()).toBe(1);
+    taskEvent({
+      asyncId: "lost-run",
+      generation: 2,
+      type: "item/backgroundTask/completed",
+      status: "completed",
+      taskStatus: "completed",
+      summary: "Detached subagent completed",
+    });
+    expect(activeCount()).toBe(0);
+  });
+
   it("returns the same counts from chunked and unchunked thread IDs", () => {
     const { db, project, thread } = setup();
     const otherThread = createThread(db, noopNotifier, {

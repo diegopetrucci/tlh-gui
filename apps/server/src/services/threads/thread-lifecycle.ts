@@ -110,7 +110,10 @@ import {
 import { cancelAbandonedProviderCreations } from "./thread-environment-providers.js";
 import { scheduleThreadProvisioningAdvance } from "./thread-provisioning.js";
 import { isPreStartThreadStatus } from "./thread-status.js";
-import { settleDanglingBackgroundTasksForStoppedThreadInTransaction } from "./background-task-reconciliation.js";
+import {
+  settleDanglingBackgroundTasksForStoppedThreadInTransaction,
+  settleDanglingBackgroundTasksForThread,
+} from "./background-task-reconciliation.js";
 import { abortPluginToolCallsForThreads } from "../plugins/plugin-tool-calls.js";
 
 type ThreadStartCommand = Awaited<ReturnType<typeof buildThreadStartCommand>>;
@@ -1020,6 +1023,13 @@ export function settleThreadStopCommandResult(
   }
 
   if (args.command.intent === "release") {
+    if (!args.report.ok) {
+      settleDanglingBackgroundTasksForStoppedThreadInTransaction(
+        args.deps,
+        { threadId: args.command.threadId },
+        { onlyTlhDetached: true },
+      );
+    }
     const thread = getThread(args.deps.db, args.command.threadId);
     if (
       args.report.ok &&
@@ -1043,6 +1053,11 @@ export function settleThreadStopCommandResult(
       args.report.errorCode !== "host_unavailable" &&
       args.report.errorCode !== "command_timeout"
     ) {
+      settleDanglingBackgroundTasksForStoppedThreadInTransaction(
+        args.deps,
+        { threadId: args.command.threadId },
+        { onlyTlhDetached: true },
+      );
       return emptyCommandResultSideEffects();
     }
 
@@ -1549,6 +1564,13 @@ export async function stopThreadForCurrentState(
     stopThreadUntilSettled(deps, thread.id, environment),
   );
   if (failure === null) {
+    if (environment === null) {
+      settleDanglingBackgroundTasksForThread(
+        deps,
+        { threadId: thread.id },
+        { onlyTlhDetached: true },
+      );
+    }
     return;
   }
   if (options?.requireStopped) {

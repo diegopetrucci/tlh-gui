@@ -154,4 +154,42 @@ describe("WorkflowWorkRowBody", () => {
     expect(screen.getByText("Adversarial review")).toBeTruthy();
     expect(screen.getByText("opus · stopped")).toBeTruthy();
   });
+
+  it.each([
+    {
+      label: "paused",
+      status: "interrupted" as const,
+      taskStatus: "paused" as const,
+      summary: "Detached subagent paused",
+      error: null,
+      visibleText: "Detached subagent paused",
+    },
+    {
+      label: "tracking-lost",
+      status: "error" as const,
+      taskStatus: "failed" as const,
+      summary: null,
+      error: "Tracking lost; the TLH run may still be running.",
+      visibleText: "Tracking lost; the TLH run may still be running.",
+    },
+  ])(
+    "renders a TLH $label settlement visibly",
+    ({ error, status, summary, taskStatus, visibleText }) => {
+      render(
+        <WorkflowWorkRowBody
+          row={workflowRow({
+            error,
+            status,
+            summary,
+            taskStatus,
+            taskType: "local_subagent",
+            workflow: null,
+          })}
+          size="base"
+        />,
+      );
+
+      expect(screen.getByText(visibleText)).toBeTruthy();
+    },
+  );
 });

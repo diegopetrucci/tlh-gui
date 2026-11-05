@@ -222,6 +222,20 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const extensionTools = new Map();
 const extensionHandlers = new Map();
+const eventBusHandlers = new Map();
+const eventBus = {
+  on(channel, handler) {
+    const handlers = eventBusHandlers.get(channel) ?? new Set();
+    handlers.add(handler);
+    eventBusHandlers.set(channel, handlers);
+    return () => handlers.delete(handler);
+  },
+  emit(channel, value) {
+    for (const handler of eventBusHandlers.get(channel) ?? []) {
+      handler(value);
+    }
+  },
+};
 let activeTools = ["read", "bash", "edit", "write"];
 const scopedModel =
   process.env.FAKE_PI_SCOPE_BY_SPAWN === "1"
@@ -305,6 +319,7 @@ async function loadExtension(path) {
   }
   const module = await import(pathToFileURL(loadPath).href);
   module.default({
+    events: eventBus,
     registerTool(tool) {
       extensionTools.set(tool.name, tool);
       if (process.env.FAKE_PI_TOOLS_DUMP) {
@@ -324,6 +339,10 @@ async function loadExtension(path) {
       activeTools = [...names];
     },
   });
+  const startupDelayMs = Number(process.env.FAKE_PI_STARTUP_DELAY_MS ?? "0");
+  if (Number.isFinite(startupDelayMs) && startupDelayMs > 0) {
+    await sleep(startupDelayMs);
+  }
   if (process.env.FAKE_PI_NO_SESSION_START !== "1") {
     await emitExtensionEvent("session_start");
   }
@@ -363,6 +382,42 @@ async function runExtensionTool(name, toolArgs) {
     isError,
   });
   return result;
+}
+
+function emitDetachedLaunch(asyncId) {
+  const toolCallId = `detached-${asyncId}`;
+  event({
+    type: "tool_execution_start",
+    toolCallId,
+    toolName: "subagent",
+    args: { agent: "reviewer", task: `Review ${asyncId}` },
+  });
+  eventBus.emit("tlh:effective-activity", {
+    activeAsyncJobIds: [asyncId],
+  });
+  event({
+    type: "tool_execution_end",
+    toolCallId,
+    toolName: "subagent",
+    isError: false,
+    result: {
+      content: [{ type: "text", text: `Async: agent [${asyncId}]` }],
+      details: {
+        asyncId,
+        mode: "single",
+        results: [],
+      },
+    },
+  });
+}
+
+function emitDetachedCompletion(asyncId, state) {
+  eventBus.emit("tlh:effective-activity", { activeAsyncJobIds: [] });
+  eventBus.emit("subagent:async-complete", { runId: asyncId, state });
+}
+
+function scheduleDetachedCompletion(asyncId, delayMs, state) {
+  setTimeout(() => emitDetachedCompletion(asyncId, state), delayMs);
 }
 
 async function runPrompt(text) {
@@ -458,6 +513,29 @@ async function runPrompt(text) {
   }
   if (text === "/die") {
     process.exit(0);
+  }
+  const detachedStartMatch = text.match(/^\/detached-start (\S+)$/u);
+  if (detachedStartMatch) {
+    emitDetachedLaunch(detachedStartMatch[1]);
+  }
+  const detachedCompletionMatch = text.match(
+    /^\/detached-complete (\S+)(?: (\S+))?$/u,
+  );
+  if (detachedCompletionMatch) {
+    emitDetachedCompletion(
+      detachedCompletionMatch[1],
+      detachedCompletionMatch[2] ?? "complete",
+    );
+  }
+  const delayedDetachedCompletionMatch = text.match(
+    /^\/detached-complete-later (\S+) (\d+)(?: (\S+))?$/u,
+  );
+  if (delayedDetachedCompletionMatch) {
+    scheduleDetachedCompletion(
+      delayedDetachedCompletionMatch[1],
+      Number(delayedDetachedCompletionMatch[2]),
+      delayedDetachedCompletionMatch[3] ?? "complete",
+    );
   }
   const uiMatch = text.match(/^\/ui (\{.*\})$/su);
   if (uiMatch) {

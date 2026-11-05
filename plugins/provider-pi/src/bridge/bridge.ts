@@ -76,6 +76,7 @@ import {
 } from "./catalog.js";
 import {
   PiRpcSession,
+  type DetachedRunUpdate,
   type PiRpcSessionOptions,
   type ToolCallForwarder,
 } from "./rpc-session.js";
@@ -350,6 +351,21 @@ function emitForSession(
   );
 }
 
+function emitDetachedRunUpdate(
+  threadId: string,
+  sessionSerial: number,
+  update: DetachedRunUpdate,
+): void {
+  sendThreadDeltas(
+    threadId,
+    piDeltaTranslator.translateDetachedRunLifecycle(update.associations, {
+      threadId,
+      sessionSerial,
+      cleanup: update.cleanup,
+    }),
+  );
+}
+
 function sendThreadIdentity(threadId: string, providerThreadId: string): void {
   send({
     jsonrpc: "2.0",
@@ -427,6 +443,15 @@ function getCurrentThreadSession(
     return undefined;
   }
   return threadSession;
+}
+
+function createOnDetachedRunUpdate(
+  args: CurrentThreadSessionArgs,
+): (update: DetachedRunUpdate) => void {
+  return (update) => {
+    if (!update.cleanup && !getCurrentThreadSession(args)) return;
+    emitDetachedRunUpdate(args.threadId, args.sessionSerial, update);
+  };
 }
 
 function createOnPiEvent(
@@ -810,12 +835,18 @@ async function constructPiThreadSession(
   params: PiSessionParams,
 ): Promise<ThreadSession> {
   const sessionSerial = nextSessionSerial();
-  const sessionOptions = await buildSessionOptions({
-    params,
-    providerThreadId,
-    threadId,
-    sessionSerial,
-  });
+  const sessionOptions = {
+    ...(await buildSessionOptions({
+      params,
+      providerThreadId,
+      threadId,
+      sessionSerial,
+    })),
+    onDetachedRunUpdate: createOnDetachedRunUpdate({
+      sessionSerial,
+      threadId,
+    }),
+  } satisfies PiRpcSessionOptions;
   const session = new PiRpcSession(
     sessionOptions,
     createForwardToolCall(() => threadId),
@@ -887,6 +918,7 @@ async function rebuildThreadSession(
   } catch (error) {
     if (!sessions.has(threadId) && !previous.closing) {
       sessions.set(threadId, previous);
+      previous.session.reconcileDetachedRunTracking();
     }
     throw error;
   }
