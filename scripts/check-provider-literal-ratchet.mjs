@@ -38,6 +38,9 @@
  * reason, an owner and when it dies. The check then requires every counted
  * file to be on that list (delete the reference or allowlist it) and every
  * entry to still match the live count (stale entries are removed, not kept).
+ * An entry marked `"fork": true` is a tlh fork-owned reference: `--base` and
+ * `--write` accept its increase only while the live count equals the entry's
+ * count. Every other increase stays rejected.
  */
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -191,6 +194,11 @@ export function checkAllowlist(scan, allowlist) {
   return problems;
 }
 
+export function forkAllowedCount(allowlist, rel, n) {
+  const entry = allowlist?.[rel];
+  return entry?.fork === true && entry.count === n;
+}
+
 export function scanTree(root, roots = SCAN_ROOTS) {
   const files = [];
   for (const r of roots) walk(join(root, r), root, files);
@@ -219,6 +227,13 @@ export function scanTree(root, roots = SCAN_ROOTS) {
   );
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
   return { files: sorted, total, hits };
+}
+
+function forkExcludedTotal(counts, allowlist) {
+  return Object.entries(counts.files).reduce(
+    (sum, [rel, n]) => sum + (forkAllowedCount(allowlist, rel, n) ? 0 : n),
+    0,
+  );
 }
 
 function baselineFromGit(root, ref) {
@@ -269,7 +284,8 @@ function main() {
   if (flags.has("--write")) {
     if (
       committed &&
-      scan.total > committed.total &&
+      forkExcludedTotal(scan, committed.allowlist) >
+        forkExcludedTotal(committed, committed.allowlist) &&
       process.env.BB_RATCHET_ALLOW_INCREASE !== "1"
     ) {
       console.error(
@@ -319,7 +335,8 @@ function main() {
       const bad = [];
       for (const [rel, n] of Object.entries(scan.files)) {
         const was = base.files[rel] ?? 0;
-        if (n > was) bad.push(`  ↑ ${rel}: ${was} → ${n}`);
+        if (n > was && !forkAllowedCount(committed?.allowlist, rel, n))
+          bad.push(`  ↑ ${rel}: ${was} → ${n}`);
       }
       if (bad.length) {
         console.error(

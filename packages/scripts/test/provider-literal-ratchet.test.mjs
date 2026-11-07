@@ -289,6 +289,89 @@ describe("ratchet CLI refusal paths (fixture root)", () => {
     expect(r.out).toMatch(/↑ packages\/core\/a\.ts: 1 → 2/);
   });
 
+  describe("fork-marked allowlist entries vs --base", () => {
+    const git = (...args) =>
+      execFileSync("git", args, {
+        cwd: dir,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    const forkEntry = (count, fork = true) => ({
+      ...entry(count),
+      ...(fork ? { fork: true } : {}),
+    });
+    function commitBase() {
+      git("init", "-q");
+      git("config", "user.email", "ratchet@test");
+      git("config", "user.name", "ratchet");
+      write("packages/core/a.ts", "export const a = 1;\n");
+      write("scripts/provider-literal-baseline.json", baseline({}));
+      git("add", "-A");
+      git("commit", "-q", "-m", "base");
+    }
+
+    it("accepts a new file's references when its entry is fork-marked at the live count", () => {
+      commitBase();
+      write("packages/core/a.ts", 'const id = "pi";\n');
+      write(
+        "scripts/provider-literal-baseline.json",
+        baseline(
+          { "packages/core/a.ts": 1 },
+          { "packages/core/a.ts": forkEntry(1) },
+        ),
+      );
+      const r = run(["--base", "HEAD"], { BB_RATCHET_ROOT: dir });
+      expect(r.code, r.out).toBe(0);
+    });
+
+    it("still rejects an increase when the entry is not fork-marked", () => {
+      commitBase();
+      write("packages/core/a.ts", 'const id = "pi";\n');
+      write(
+        "scripts/provider-literal-baseline.json",
+        baseline(
+          { "packages/core/a.ts": 1 },
+          { "packages/core/a.ts": forkEntry(1, false) },
+        ),
+      );
+      const r = run(["--base", "HEAD"], { BB_RATCHET_ROOT: dir });
+      expect(r.code, r.out).toBe(1);
+      expect(r.out).toMatch(/↑ packages\/core\/a\.ts: 0 → 1/);
+    });
+
+    it("rejects a fork-marked entry whose count differs from the live count", () => {
+      commitBase();
+      write("packages/core/a.ts", 'const id = "pi"; const b = "pi";\n');
+      write(
+        "scripts/provider-literal-baseline.json",
+        baseline(
+          { "packages/core/a.ts": 1 },
+          { "packages/core/a.ts": forkEntry(1) },
+        ),
+      );
+      const r = run(["--base", "HEAD"], { BB_RATCHET_ROOT: dir });
+      expect(r.code, r.out).toBe(1);
+      expect(r.out).toMatch(/↑ packages\/core\/a\.ts: 0 → 2/);
+    });
+
+    it("--write may raise the total for a fork-marked file but not an unmarked one", () => {
+      write("packages/core/a.ts", 'const id = "pi";\n');
+      write(
+        "scripts/provider-literal-baseline.json",
+        JSON.stringify({
+          total: 0,
+          files: {},
+          allowlist: { "packages/core/a.ts": forkEntry(1) },
+        }),
+      );
+      expect(run(["--write"], { BB_RATCHET_ROOT: dir }).code).toBe(0);
+      write("packages/core/b.ts", 'const id = "pi";\n');
+      const r = run(["--write"], { BB_RATCHET_ROOT: dir });
+      expect(r.code, r.out).toBe(1);
+      expect(r.out).toMatch(/Refusing to raise the baseline/);
+    });
+  });
+
   it("fails when a counted file has no allowlist entry", () => {
     write("packages/core/a.ts", 'const id = "codex";\n');
     write(
