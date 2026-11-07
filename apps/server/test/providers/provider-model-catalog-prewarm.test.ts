@@ -36,7 +36,7 @@ const ALWAYS_VISIBLE_PROVIDER_IDS = [
   "acp-cursor",
   "claude-code",
   "codex",
-  "pi",
+  "tlh",
 ];
 
 type RpcCommand = HostDaemonOnlineRpcRequestMessage["command"];
@@ -284,7 +284,7 @@ describe("provider model catalog prewarm", () => {
 
       await withPrewarm(harness, async () => {
         await waitForPasses(logLines, 1);
-        expect(prewarmed()).toEqual(["catalog-probe", "claude-code", "pi"]);
+        expect(prewarmed()).toEqual(["catalog-probe", "claude-code", "tlh"]);
 
         clock.now += HOUR;
         probe.dispose();
@@ -295,7 +295,7 @@ describe("provider model catalog prewarm", () => {
           "catalog-probe",
           "catalog-probe",
           "claude-code",
-          "pi",
+          "tlh",
         ]);
       });
     });

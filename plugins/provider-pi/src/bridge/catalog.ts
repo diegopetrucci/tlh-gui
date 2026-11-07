@@ -1,6 +1,10 @@
 import type { AvailableModel } from "@get-bb/plugin-sdk/provider-bridge";
 import { resolve } from "node:path";
 import {
+  DEFAULT_PI_BRIDGE_OPTIONS,
+  type PiBridgeOptions,
+} from "../bridge-options.js";
+import {
   createPiModelContextWindowResolverFrom,
   type PiModelContextWindowResolver,
 } from "../delta-translation.js";
@@ -90,6 +94,7 @@ const catalogsByCwd = new Map<string, Promise<PiCatalog>>();
 async function spawnCatalog(
   cwd: string,
   extensionPath: string,
+  bridgeOptions: PiBridgeOptions,
   touch: () => void,
 ): Promise<PiCatalog> {
   interface CatalogChildGeneration {
@@ -132,6 +137,7 @@ async function spawnCatalog(
     const child = new PiRpcChild({
       cwd,
       env: buildPiChildEnv({}),
+      bridgeOptions,
       args: ["--mode", "rpc", "--no-session", "--extension", extensionPath],
       onEvent: () => {},
       onChannelMessage: (message) => {
@@ -363,13 +369,14 @@ export function peekPiCatalog(cwd: string): Promise<PiCatalog> | null {
 export function getPiCatalog(
   cwd: string,
   extensionPath: string,
+  bridgeOptions: PiBridgeOptions = DEFAULT_PI_BRIDGE_OPTIONS,
 ): Promise<PiCatalog> {
   const key = resolve(cwd);
   const existing = catalogsByCwd.get(key);
   if (existing) {
     return existing;
   }
-  const created = spawnCatalog(key, extensionPath, () =>
+  const created = spawnCatalog(key, extensionPath, bridgeOptions, () =>
     touchCatalog(key),
   ).catch((error: unknown) => {
     catalogsByCwd.delete(key);

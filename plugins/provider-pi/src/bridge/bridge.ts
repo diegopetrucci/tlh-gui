@@ -53,6 +53,13 @@ import {
   buildPiTurnOptions,
   type PiSessionParams,
 } from "../session-params.js";
+import {
+  DEFAULT_PI_BRIDGE_OPTIONS,
+  PI_BRIDGE_OPTIONS_BY_FLAVOR,
+  PI_FLAVORS,
+  parsePiBridgeOptions,
+  type PiBridgeOptions,
+} from "../bridge-options.js";
 import { piSessionNeedsRelocation } from "./session-cwd.js";
 import { BB_PI_EXTENSION_SOURCE } from "./bb-pi-extension.js";
 import {
@@ -65,9 +72,9 @@ import {
   getPiProviderInstallationRun,
   getPiProviderInstallationStatus,
   piHealthResult,
+  piNotInstalledMessage,
   resetPiInstallGateForTests,
 } from "./provider-maintenance.js";
-import { tlhNotInstalledMessage } from "./tlh-maintenance.js";
 import { createPiCommandListMemo, listPiCommands } from "./commands.js";
 import {
   closeAllPiCatalogs,
@@ -86,8 +93,45 @@ import {
 } from "./session-paths.js";
 import { extractPiPromptInput } from "./turn-input.js";
 
+let bridgeOptions: PiBridgeOptions = DEFAULT_PI_BRIDGE_OPTIONS;
+let bridgeOptionsBound = false;
+
+function flavorOptionsForProviderId(
+  providerId: unknown,
+): PiBridgeOptions | null {
+  return (
+    PI_FLAVORS.map((flavor) => PI_BRIDGE_OPTIONS_BY_FLAVOR[flavor]).find(
+      (preset) => preset.piFlavor === providerId,
+    ) ?? null
+  );
+}
+
+function bindBridgeOptions(request: { params?: unknown }): void {
+  const params =
+    typeof request.params === "object" && request.params !== null
+      ? (request.params as { options?: unknown; providerOptions?: unknown })
+      : {};
+  const sessionOptions = params.options;
+  const raw =
+    params.providerOptions ??
+    (typeof sessionOptions === "object" && sessionOptions !== null
+      ? (sessionOptions as { providerOptions?: unknown }).providerOptions
+      : undefined);
+  const parsed =
+    parsePiBridgeOptions(raw) ??
+    flavorOptionsForProviderId((params as { providerId?: unknown }).providerId);
+  if (parsed === null) return;
+  if (bridgeOptionsBound && parsed.piFlavor !== bridgeOptions.piFlavor) {
+    throw new Error(
+      `This bridge process is bound to the ${bridgeOptions.piFlavor} flavor and cannot serve ${parsed.piFlavor}.`,
+    );
+  }
+  bridgeOptions = parsed;
+  bridgeOptionsBound = true;
+}
+
 let listCommandsMemoized = createPiCommandListMemo({
-  list: (cwd) => listPiCommands(cwd, requireExtensionPath()),
+  list: (cwd) => listPiCommands(cwd, requireExtensionPath(), bridgeOptions),
 });
 
 const piCommandSchema = z.discriminatedUnion("method", [
@@ -564,6 +608,7 @@ function reportSessionError(
 async function handleRequest(
   request: PiCommand & { id: string | number },
 ): Promise<void> {
+  bindBridgeOptions(request);
   switch (request.method) {
     case "initialize": {
       const result: InitializeResult = {
@@ -599,13 +644,19 @@ async function handleRequest(
     case "provider/installation/status":
       sendResult(
         request.id,
-        await getPiProviderInstallationStatus(request.params.checkUpdates),
+        await getPiProviderInstallationStatus(
+          request.params.checkUpdates,
+          bridgeOptions,
+        ),
       );
       break;
     case "provider/installation/run":
       sendResult(
         request.id,
-        await getPiProviderInstallationRun(request.params.action),
+        await getPiProviderInstallationRun(
+          request.params.action,
+          bridgeOptions,
+        ),
       );
       break;
     case "thread/start":
@@ -670,7 +721,7 @@ async function handleCommandList(
   id: string | number,
   params: { cwd: string },
 ): Promise<void> {
-  const gate = await getPiInstallGate();
+  const gate = await getPiInstallGate(bridgeOptions);
   if (!gate.ok) {
     sendError(
       id,
@@ -678,8 +729,9 @@ async function handleCommandList(
         ? BRIDGE_JSON_RPC_ERRORS.MISSING_EXECUTABLE
         : -32000,
       gate.status === "not_installed"
-        ? tlhNotInstalledMessage()
-        : (gate.statusMessage ?? "Pi is not supported on this host."),
+        ? piNotInstalledMessage(bridgeOptions)
+        : (gate.statusMessage ??
+            `${bridgeOptions.displayName} is not supported on this host.`),
     );
     return;
   }
@@ -698,7 +750,7 @@ async function handleModelList(
   id: string | number,
   params: { cwd?: string },
 ): Promise<void> {
-  const gate = await getPiInstallGate();
+  const gate = await getPiInstallGate(bridgeOptions);
   if (!gate.ok) {
     sendError(
       id,
@@ -706,8 +758,9 @@ async function handleModelList(
         ? BRIDGE_JSON_RPC_ERRORS.MISSING_EXECUTABLE
         : -32000,
       gate.status === "not_installed"
-        ? tlhNotInstalledMessage()
-        : (gate.statusMessage ?? "Pi is not supported on this host."),
+        ? piNotInstalledMessage(bridgeOptions)
+        : (gate.statusMessage ??
+            `${bridgeOptions.displayName} is not supported on this host.`),
     );
     return;
   }
@@ -715,6 +768,7 @@ async function handleModelList(
     const catalog = await getPiCatalog(
       params.cwd ?? process.cwd(),
       requireExtensionPath(),
+      bridgeOptions,
     );
     contextWindows.learn(await catalog.rawModels());
     sendResult(id, await catalog.listModels());
@@ -731,7 +785,7 @@ async function handleProviderHealth(
   id: string | number,
   params: { cwd?: string },
 ): Promise<void> {
-  const gate = await getPiInstallGate();
+  const gate = await getPiInstallGate(bridgeOptions);
   if (!gate.ok) {
     sendResult(id, gate.result);
     return;
@@ -741,22 +795,23 @@ async function handleProviderHealth(
     const catalog = await getPiCatalog(
       params.cwd ?? process.cwd(),
       requireExtensionPath(),
+      bridgeOptions,
     );
     await catalog.probe();
     const models = await catalog.rawModels();
     sendResult(
       id,
       models.length > 0
-        ? piHealthResult("ready", { installedVersion })
-        : piHealthResult("unauthenticated", {
+        ? piHealthResult(bridgeOptions, "ready", { installedVersion })
+        : piHealthResult(bridgeOptions, "unauthenticated", {
             installedVersion,
-            statusMessage: "Pi has no authenticated model provider available.",
+            statusMessage: `${bridgeOptions.displayName} has no authenticated model provider available.`,
           }),
     );
   } catch (error) {
     sendResult(
       id,
-      piHealthResult("unknown", {
+      piHealthResult(bridgeOptions, "unknown", {
         installedVersion,
         statusMessage: error instanceof Error ? error.message : String(error),
       }),
@@ -768,7 +823,11 @@ async function resolvePiModel(
   modelStr: string,
   cwd: string,
 ): Promise<{ provider: string; id: string }> {
-  const catalog = await getPiCatalog(cwd, requireExtensionPath());
+  const catalog = await getPiCatalog(
+    cwd,
+    requireExtensionPath(),
+    bridgeOptions,
+  );
   const models = await catalog.rawModels();
   const canonical = models.find(
     (model) => `${model.provider}/${model.id}` === modelStr,
@@ -822,6 +881,7 @@ async function buildSessionOptions(args: {
     scratchDir: requireScratchDir(),
     extensionPath: requireExtensionPath(),
     recordThreadId: args.threadId,
+    bridgeOptions,
     onExtensionUiRequest: createOnExtensionUiRequest({
       sessionSerial: args.sessionSerial,
       threadId: args.threadId,
@@ -1326,8 +1386,10 @@ export async function experimental_closeAllForTests(): Promise<void> {
   await closeAllPiCatalogs();
   resetPiInstallGateForTests();
   listCommandsMemoized = createPiCommandListMemo({
-    list: (cwd) => listPiCommands(cwd, requireExtensionPath()),
+    list: (cwd) => listPiCommands(cwd, requireExtensionPath(), bridgeOptions),
   });
+  bridgeOptions = DEFAULT_PI_BRIDGE_OPTIONS;
+  bridgeOptionsBound = false;
   if (scratchDir !== null && scratchDirIsPrivate) {
     rmSync(scratchDir, { recursive: true, force: true });
     scratchDir = null;

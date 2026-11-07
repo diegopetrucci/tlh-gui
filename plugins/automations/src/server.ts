@@ -11,6 +11,7 @@ import {
 } from "./run.js";
 import { registerAutomationCli } from "./cli.js";
 import { createAutomationService } from "./service.js";
+import { relabelPiProviderToTlh } from "./tlh-provider-relabel.js";
 import { sleep, sweepDueAutomations, SWEEP_INTERVAL_MS } from "./sweep.js";
 
 function resolveServerUrl(): string {
@@ -22,6 +23,7 @@ export default async function plugin(bb: BbPluginApi) {
   bb.storage.migrate(db, migrations);
   const pluginDataDir = pluginDataDirFromDb(db);
   await ingestLegacyImport({ bb, db, pluginDataDir });
+  await relabelPiProviderToTlh({ bb, db });
 
   const service = createAutomationService({
     bb,

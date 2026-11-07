@@ -1,10 +1,27 @@
 import path from "node:path";
+import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mockState = vi.hoisted(() => ({
   command: "pi",
   executablePath: "/usr/local/bin/pi",
 }));
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const original = await importOriginal<typeof import("node:child_process")>();
+  const execFile = Object.assign(
+    vi.fn(() => {
+      throw new Error("execFile must be called through promisify");
+    }),
+    {
+      [promisify.custom]: vi.fn(async () => ({
+        stdout: "0.84.0\n",
+        stderr: "",
+      })),
+    },
+  );
+  return { ...original, default: { ...original, execFile }, execFile };
+});
 
 vi.mock("@get-bb/plugin-sdk/provider-bridge", async (importOriginal) => {
   const original =
@@ -28,6 +45,7 @@ vi.mock("./rpc-child.js", () => ({
   resolvePiProcessLaunch: () => ({ command: mockState.command, args: [] }),
 }));
 
+import { PI_BRIDGE_OPTIONS_BY_FLAVOR } from "../bridge-options.js";
 import {
   getPiProviderInstallationRun,
   getPiProviderInstallationStatus,
@@ -70,14 +88,18 @@ describe("non-tlh command keeps upstream npm behavior", () => {
 describe("piHealthResult loginCommand — mode-aware", () => {
   it("returns 'pi' when command is pi (non-tlh mode)", () => {
     mockState.command = "pi";
-    expect(piHealthResult("ready")).toMatchObject({
+    expect(
+      piHealthResult(PI_BRIDGE_OPTIONS_BY_FLAVOR.pi, "ready"),
+    ).toMatchObject({
       health: { loginCommand: "pi" },
     });
   });
 
   it("returns 'tlh' when command is tlh (tlh mode)", () => {
     mockState.command = "tlh";
-    expect(piHealthResult("ready")).toMatchObject({
+    expect(
+      piHealthResult(PI_BRIDGE_OPTIONS_BY_FLAVOR.tlh, "ready"),
+    ).toMatchObject({
       health: { loginCommand: "tlh" },
     });
   });
@@ -91,7 +113,10 @@ describe("getPiProviderInstallationRun — Windows win32 guard in tlh mode", () 
   it("returns available:false with bash message for install action on win32 in tlh mode", async () => {
     mockState.command = "tlh";
     vi.spyOn(process, "platform", "get").mockReturnValue("win32");
-    const result = await getPiProviderInstallationRun("install");
+    const result = await getPiProviderInstallationRun(
+      "install",
+      PI_BRIDGE_OPTIONS_BY_FLAVOR.tlh,
+    );
     expect(result).toMatchObject({
       available: false,
       message: expect.stringContaining("bash"),

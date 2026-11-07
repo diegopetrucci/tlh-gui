@@ -20,8 +20,18 @@
     "experimental_providers": [
       {
         "kind": "agent",
-        "id": "pi",
+        "id": "tlh",
         "displayName": "TLH"
+      },
+      {
+        "kind": "agent",
+        "id": "tlh-main",
+        "displayName": "TLH main"
+      },
+      {
+        "kind": "agent",
+        "id": "pi",
+        "displayName": "Pi"
       }
     ]
   },

@@ -5,6 +5,8 @@ import { z } from "zod";
 const BUNDLED_PROVIDER_IDS = [
   "codex",
   "claude-code",
+  "tlh",
+  "tlh-main",
   "pi",
   "acp-cursor",
 ] as const;

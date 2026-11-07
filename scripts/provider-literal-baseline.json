@@ -1,13 +1,15 @@
 {
-  "_comment": "Provider-literal ratchet (G1). Per-file occurrence count of provider-ID references in core. May only go DOWN. Regenerate: node scripts/check-provider-literal-ratchet.mjs --write. Every counted file must have an `allowlist` entry (count, reason, owner, diesAt); the entries are authored by hand and survive --write. Delete this file and the guard when empty.",
-  "total": 14,
+  "_comment": "Provider-literal ratchet (G1). Per-file occurrence count of provider-ID references in core. May only go DOWN. Regenerate: node scripts/check-provider-literal-ratchet.mjs --write. Every counted file must have an `allowlist` entry (count, reason, owner, diesAt); the entries are authored by hand and survive --write; `fork: true` marks tlh fork-owned entries whose increase --base accepts at the allowlisted count. Delete this file and the guard when empty.",
+  "total": 16,
   "files": {
     "apps/demo-server/src/fixtures/providers.ts": 3,
     "apps/demo-server/src/fixtures/world.ts": 2,
     "apps/server/src/services/threads/thread-edit-message.ts": 1,
     "packages/config/src/bb-app-managed-config.ts": 4,
+    "packages/db/src/migrate.ts": 1,
     "packages/scripts/src/commands/archive-codex-tmp-bb-sessions.ts": 1,
-    "packages/scripts/src/lib/seed-perf-fixture.ts": 3
+    "packages/scripts/src/lib/seed-perf-fixture.ts": 3,
+    "plugins/automations/src/tlh-provider-relabel.ts": 1
   },
   "allowlist": {
     "apps/demo-server/src/fixtures/providers.ts": {
@@ -34,6 +36,13 @@
       "owner": "core config (customModels enum)",
       "diesAt": "when customModels accepts any registered provider id"
     },
+    "packages/db/src/migrate.ts": {
+      "count": 1,
+      "reason": "fork-owned one-time legacy relabel of pre-split pi threads to tlh",
+      "owner": "tlh fork",
+      "diesAt": "when no supported fork install predates the provider split",
+      "fork": true
+    },
     "packages/scripts/src/commands/archive-codex-tmp-bb-sessions.ts": {
       "count": 1,
       "reason": "ops script for codex temp sessions: names the `codex` executable, not a provider branch.",
@@ -45,6 +54,13 @@
       "reason": "perf fixture generator: seeds threads for two providers so the timeline benchmark covers both shapes.",
       "owner": "owner-accepted (fixture)",
       "diesAt": "never (fixture)"
+    },
+    "plugins/automations/src/tlh-provider-relabel.ts": {
+      "count": 1,
+      "reason": "fork-owned one-time legacy relabel of pre-split pi threads to tlh",
+      "owner": "tlh fork",
+      "diesAt": "when no supported fork install predates the provider split",
+      "fork": true
     }
   }
 }

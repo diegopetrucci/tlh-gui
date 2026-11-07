@@ -92,7 +92,11 @@ export function resolveReplayProfile(
         rewriteAcpLaunchSpec(line, replayCommand),
     };
   }
-  if (providerId === "pi") {
+  if (
+    providerId === "pi" ||
+    providerId === "tlh" ||
+    providerId === "tlh-main"
+  ) {
     return {
       dialect: "pi-rpc",
       bridgeFamily: "pi",
@@ -101,6 +105,7 @@ export function resolveReplayProfile(
         BB_PI_BRIDGE_ARGS: JSON.stringify(replayCommand.slice(1)),
         BB_PI_BRIDGE_SESSION_DIR: piSessionDir(stateDir),
       }),
+      rewriteRuntimeLine: (line) => stripPiFlavorOptions(line),
       prepareState: seedPiSessionFiles,
     };
   }
@@ -232,6 +237,50 @@ function rewriteAcpLaunchSpec(line: string, replayCommand: string[]): string {
     args: replayCommand.slice(1),
     env: {},
   };
+  return JSON.stringify(parsed);
+}
+
+const PI_FLAVOR_OPTION_KEYS = [
+  "piFlavor",
+  "displayName",
+  "command",
+  "loginCommand",
+  "maintenance",
+  "agentDir",
+];
+
+function stripPiFlavorOptions(line: string): string {
+  if (!line.includes('"piFlavor"')) {
+    return line;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return line;
+  }
+  if (typeof parsed !== "object" || parsed === null) {
+    return line;
+  }
+  const params = (
+    parsed as {
+      params?: {
+        providerOptions?: Record<string, unknown>;
+        options?: { providerOptions?: Record<string, unknown> };
+      };
+    }
+  ).params;
+  for (const providerOptions of [
+    params?.providerOptions,
+    params?.options?.providerOptions,
+  ]) {
+    if (providerOptions === undefined || !("piFlavor" in providerOptions)) {
+      continue;
+    }
+    for (const key of PI_FLAVOR_OPTION_KEYS) {
+      delete providerOptions[key];
+    }
+  }
   return JSON.stringify(parsed);
 }
 

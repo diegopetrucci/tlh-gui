@@ -21,12 +21,14 @@ import {
 } from "@get-bb/plugin-sdk/provider-bridge";
 import {
   getTlhInstallationStatus,
-  isTlhMode,
-  piLoginCommand,
   tlhInstallGuidance,
   tlhInstallationRun,
 } from "./tlh-maintenance.js";
 import { resolvePiLaunch, resolvePiProcessLaunch } from "./rpc-child.js";
+import {
+  DEFAULT_PI_BRIDGE_OPTIONS,
+  type PiBridgeOptions,
+} from "../bridge-options.js";
 
 const execFileAsync = promisify(execFile);
 export const PI_MINIMUM_SUPPORTED_VERSION = "0.84.0";
@@ -136,8 +138,15 @@ async function piGlobalInstallCommand(
     : npmGlobalInstallCommand(PI_NPM_PACKAGE);
 }
 
-export async function probePiVersion(): Promise<PiVersionProbe> {
-  const launch = resolvePiProcessLaunch(process.env);
+export async function probePiVersion(
+  options: PiBridgeOptions = DEFAULT_PI_BRIDGE_OPTIONS,
+): Promise<PiVersionProbe> {
+  const launch = resolvePiProcessLaunch(
+    process.env,
+    process.env,
+    process.cwd(),
+    options,
+  );
   const display = formatCommand(launch.command, [...launch.args, "--version"]);
   let stdout: string;
   try {
@@ -179,15 +188,20 @@ export function describePiVersionProbeFailure(error: unknown): string {
 
 export async function getPiProviderInstallationStatus(
   checkUpdates = true,
+  options: PiBridgeOptions = DEFAULT_PI_BRIDGE_OPTIONS,
 ): Promise<ProviderInstallationStatus> {
-  if (isTlhMode()) {
-    return getTlhInstallationStatus(checkUpdates, PI_MINIMUM_SUPPORTED_VERSION);
+  if (options.maintenance === "tlh") {
+    return getTlhInstallationStatus(
+      checkUpdates,
+      PI_MINIMUM_SUPPORTED_VERSION,
+      options,
+    );
   }
-  const launch = resolvePiLaunch(process.env);
+  const launch = resolvePiLaunch(process.env, options);
   const [resolvedExecutable, probe, latestVersion, npmGlobal] =
     await Promise.all([
       resolveExecutablePath(launch.command),
-      probePiVersion(),
+      probePiVersion(options),
       checkUpdates ? npmLatestVersion(PI_NPM_PACKAGE) : null,
       checkUpdates
         ? probeNpmGlobalPackage(PI_NPM_PACKAGE)
@@ -241,22 +255,31 @@ export async function getPiProviderInstallationStatus(
 
 export async function getPiProviderInstallationRun(
   action: "install" | "update",
+  options: PiBridgeOptions = DEFAULT_PI_BRIDGE_OPTIONS,
 ): Promise<ProviderInstallationRunResult> {
-  if (isTlhMode() && action === "install" && process.platform === "win32") {
+  if (
+    options.maintenance === "tlh" &&
+    action === "install" &&
+    process.platform === "win32"
+  ) {
     return {
       available: false,
       message: "The Last Harness installer requires bash, macOS, or Linux.",
     };
   }
-  const status = await getPiProviderInstallationStatus();
+  const status = await getPiProviderInstallationStatus(true, options);
   if (status.installAction?.kind !== action) {
     return {
       available: false,
-      message: `Pi ${action} is no longer available on this host.`,
+      message: `${options.displayName} ${action} is no longer available on this host.`,
     };
   }
-  if (isTlhMode()) {
-    const { command, verification } = await tlhInstallationRun(status, action);
+  if (options.maintenance === "tlh") {
+    const { command, verification } = await tlhInstallationRun(
+      status,
+      action,
+      options,
+    );
     return { available: true, command, verification };
   }
   return {
@@ -267,6 +290,7 @@ export async function getPiProviderInstallationRun(
 }
 
 export function piHealthResult(
+  options: PiBridgeOptions,
   status:
     | "ready"
     | "not_installed"
@@ -289,7 +313,7 @@ export function piHealthResult(
       minimumSupportedVersion: PI_MINIMUM_SUPPORTED_VERSION,
       canInstall: true,
       canUpdate: status !== "not_installed",
-      loginCommand: piLoginCommand(),
+      loginCommand: options.loginCommand,
     },
   };
 }
@@ -303,40 +327,53 @@ export type PiInstallGate =
       result: ProviderHealthResult;
     };
 
-async function installGuidance(): Promise<string> {
-  return isTlhMode()
-    ? tlhInstallGuidance()
+export function piNotInstalledMessage(options: PiBridgeOptions): string {
+  switch (options.piFlavor) {
+    case "tlh":
+      return "Could not find the tlh CLI on this host. Install The Last Harness from https://github.com/diegopetrucci/the-last-harness and retry.";
+    case "tlh-main":
+      return "Could not find the tlh-main CLI on this host. Install a main-branch build of The Last Harness from https://github.com/diegopetrucci/the-last-harness and retry.";
+    case "pi":
+      return "Could not find the pi CLI on this host. Install @earendil-works/pi-coding-agent and retry.";
+  }
+}
+
+async function installGuidance(options: PiBridgeOptions): Promise<string> {
+  return options.maintenance === "tlh"
+    ? tlhInstallGuidance(options)
     : `Install ${PI_NPM_PACKAGE} ${PI_MINIMUM_SUPPORTED_VERSION} or newer: ${npmGlobalInstallCommand(PI_NPM_PACKAGE).displayCommand}`;
 }
 
-async function probePiInstallGate(): Promise<PiInstallGate> {
-  const launch = resolvePiLaunch(process.env);
+async function probePiInstallGate(
+  options: PiBridgeOptions,
+): Promise<PiInstallGate> {
+  const launch = resolvePiLaunch(process.env, options);
   if ((await resolveExecutablePath(launch.command)) === null) {
     return {
       ok: false,
       status: "not_installed",
       statusMessage: null,
-      result: piHealthResult("not_installed"),
+      result: piHealthResult(options, "not_installed"),
     };
   }
-  const probe = await probePiVersion();
+  const probe = await probePiVersion(options);
   if (probe.version === null) {
-    const statusMessage = `Could not determine the pi version: ${probe.failure}. ${await installGuidance()}`;
+    const statusMessage = `Could not determine the ${options.command} version: ${probe.failure}. ${await installGuidance(options)}`;
     return {
       ok: false,
       status: "unknown",
       statusMessage,
-      result: piHealthResult("unknown", { statusMessage }),
+      result: piHealthResult(options, "unknown", { statusMessage }),
     };
   }
   const installedVersion = probe.version;
   if (compareVersions(installedVersion, PI_MINIMUM_SUPPORTED_VERSION) < 0) {
-    const statusMessage = `Pi ${installedVersion} is older than the supported minimum ${PI_MINIMUM_SUPPORTED_VERSION}. ${await installGuidance()}`;
+    const statusMessage = `${options.displayName} ${installedVersion} is older than the supported minimum ${PI_MINIMUM_SUPPORTED_VERSION}. ${await installGuidance(options)}`;
     return {
       ok: false,
       status: "unsupported_version",
       statusMessage,
-      result: piHealthResult("unsupported_version", {
+      result: piHealthResult(options, "unsupported_version", {
         installedVersion,
         statusMessage,
       }),
@@ -350,15 +387,17 @@ const installGateMemo = new Map<
   { expiresAt: number; gate: Promise<PiInstallGate> }
 >();
 
-export function getPiInstallGate(): Promise<PiInstallGate> {
-  const launch = resolvePiLaunch(process.env);
-  const key = JSON.stringify([launch.command, launch.args]);
+export function getPiInstallGate(
+  options: PiBridgeOptions = DEFAULT_PI_BRIDGE_OPTIONS,
+): Promise<PiInstallGate> {
+  const launch = resolvePiLaunch(process.env, options);
+  const key = JSON.stringify([options.piFlavor, launch.command, launch.args]);
   const now = Date.now();
   const cached = installGateMemo.get(key);
   if (cached !== undefined && cached.expiresAt > now) {
     return cached.gate;
   }
-  const gate = probePiInstallGate();
+  const gate = probePiInstallGate(options);
   installGateMemo.set(key, { expiresAt: now + INSTALL_GATE_TTL_MS, gate });
   gate.catch(() => {
     if (installGateMemo.get(key)?.gate === gate) installGateMemo.delete(key);

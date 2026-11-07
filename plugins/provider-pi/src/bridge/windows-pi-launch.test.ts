@@ -169,7 +169,7 @@ describe("Windows Pi npm launch", () => {
 
   it("keeps default configuration independent from process resolution", () => {
     expect(resolvePiLaunch({ BB_PI_BRIDGE_ARGS: "invalid" })).toEqual({
-      command: "tlh",
+      command: "pi",
       args: [],
     });
     expect(() =>
@@ -183,7 +183,7 @@ describe("Windows Pi npm launch", () => {
   it.skipIf(process.platform === "win32")(
     "preserves non-Windows process launches",
     () => {
-      expect(resolvePiProcessLaunch({})).toEqual({ command: "tlh", args: [] });
+      expect(resolvePiProcessLaunch({})).toEqual({ command: "pi", args: [] });
     },
   );
 

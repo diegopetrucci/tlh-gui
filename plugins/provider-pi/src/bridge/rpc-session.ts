@@ -1,6 +1,7 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
+import type { PiBridgeOptions } from "../bridge-options.js";
 import {
   createDetachedRunReconciler,
   type DetachedRunCandidate,
@@ -31,6 +32,7 @@ export interface PiRpcSessionOptions {
   scratchDir: string;
   extensionPath: string;
   recordThreadId: string;
+  bridgeOptions?: PiBridgeOptions;
   noSession?: boolean;
   onExtensionUiRequest?: (request: Record<string, unknown>) => void;
   onDetachedRunUpdate?: (update: DetachedRunUpdate) => void;
@@ -486,6 +488,9 @@ export class PiRpcSession {
         PI_BB_TOOLS_FILE: toolsFilePath,
       }),
       args,
+      ...(this.options.bridgeOptions
+        ? { bridgeOptions: this.options.bridgeOptions }
+        : {}),
       onEvent: (event) => {
         if (child === this.child) this.handleEvent(event);
       },
