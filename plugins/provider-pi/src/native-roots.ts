@@ -6,40 +6,69 @@ import {
   type ExperimentalNativeRootsResolveAnswer,
 } from "@get-bb/plugin-sdk/host";
 import { z } from "zod";
+import {
+  PI_BRIDGE_OPTIONS_BY_FLAVOR,
+  type PiFlavor,
+} from "./bridge-options.js";
 
-export const PI_NATIVE_ROOTS_DECLARATION: Pick<
+const DEFAULT_PI_AGENT_DIR = ".pi/agent";
+
+function defaultAgentDirRelativeToHome(flavor: PiFlavor): string {
+  const agentDir = PI_BRIDGE_OPTIONS_BY_FLAVOR[flavor].agentDir;
+  return agentDir === undefined
+    ? DEFAULT_PI_AGENT_DIR
+    : agentDir.replace(/^~\//u, "");
+}
+
+export function piNativeRootsDeclaration(
+  flavor: PiFlavor,
+): Pick<
   PluginProviderDeclaration,
   "experimental_nativeSkillRoots" | "experimental_resolvesNativeRoots"
-> = {
-  experimental_nativeSkillRoots: {
-    user: [
-      { path: ".pi/agent/skills", recursive: true },
-      { path: ".agents/skills", recursive: true },
-    ],
-    project: [
-      { path: ".pi/skills", recursive: true },
-      { path: ".agents/skills", recursive: true, ancestors: true },
-    ],
-  },
-  experimental_resolvesNativeRoots: true,
-};
+> {
+  return {
+    experimental_nativeSkillRoots: {
+      user: [
+        {
+          path: `${defaultAgentDirRelativeToHome(flavor)}/skills`,
+          recursive: true,
+        },
+        { path: ".agents/skills", recursive: true },
+      ],
+      project: [
+        { path: ".pi/skills", recursive: true },
+        { path: ".agents/skills", recursive: true, ancestors: true },
+      ],
+    },
+    experimental_resolvesNativeRoots: true,
+  };
+}
+
+export const PI_NATIVE_ROOTS_DECLARATION = piNativeRootsDeclaration("pi");
 
 const piSettingsSchema = z
   .object({ skills: z.array(z.string()).optional() })
   .passthrough();
 
-const DEFAULT_AGENT_DIR_SEGMENTS = [".pi", "agent"] as const;
-
 export interface ResolvePiNativeRootsArgs {
   homeDir: string;
   env: Readonly<Record<string, string | undefined>>;
+  flavor?: PiFlavor;
+}
+
+function defaultAgentDir(args: ResolvePiNativeRootsArgs): string {
+  return path.join(
+    args.homeDir,
+    ...defaultAgentDirRelativeToHome(args.flavor ?? "pi").split("/"),
+  );
 }
 
 function resolvePiAgentDir(args: ResolvePiNativeRootsArgs): string {
+  if ((args.flavor ?? "pi") !== "pi") return defaultAgentDir(args);
   const configured = args.env.PI_CODING_AGENT_DIR?.trim();
   return configured
     ? resolveStoredPath(args.homeDir, configured, args.homeDir)
-    : path.join(args.homeDir, ...DEFAULT_AGENT_DIR_SEGMENTS);
+    : defaultAgentDir(args);
 }
 
 function resolveStoredPath(
@@ -61,7 +90,7 @@ export async function resolvePiNativeRoots(
 ): Promise<ExperimentalNativeRootsResolveAnswer> {
   const agentDir = resolvePiAgentDir(args);
   const roots = new Set<string>();
-  if (agentDir !== path.join(args.homeDir, ...DEFAULT_AGENT_DIR_SEGMENTS)) {
+  if (agentDir !== defaultAgentDir(args)) {
     roots.add(path.resolve(agentDir, "skills"));
   }
   let settings: z.infer<typeof piSettingsSchema> | null = null;

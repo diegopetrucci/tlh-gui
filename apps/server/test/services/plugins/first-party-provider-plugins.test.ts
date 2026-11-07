@@ -9,7 +9,7 @@ const FIRST_PARTY_PROVIDER_DECLARATIONS = [
   {
     builtinName: "provider-pi",
     pluginId: "provider-pi",
-    providerId: "pi",
+    providerId: "tlh",
     displayName: "TLH",
     supportsThreadArchive: false,
     supportsThreadRename: false,
@@ -17,6 +17,32 @@ const FIRST_PARTY_PROVIDER_DECLARATIONS = [
     supportsManualCompaction: true,
     supportsUsage: false,
     visibility: "always",
+    hasLogo: true,
+  },
+  {
+    builtinName: "provider-pi",
+    pluginId: "provider-pi",
+    providerId: "tlh-main",
+    displayName: "TLH main",
+    supportsThreadArchive: false,
+    supportsThreadRename: false,
+    fork: "checkpoint",
+    supportsManualCompaction: true,
+    supportsUsage: false,
+    visibility: "installed",
+    hasLogo: true,
+  },
+  {
+    builtinName: "provider-pi",
+    pluginId: "provider-pi",
+    providerId: "pi",
+    displayName: "Pi",
+    supportsThreadArchive: false,
+    supportsThreadRename: false,
+    fork: "checkpoint",
+    supportsManualCompaction: true,
+    supportsUsage: false,
+    visibility: "installed",
     hasLogo: true,
   },
   {
@@ -292,9 +318,45 @@ describe("first-party provider plugins", () => {
           },
           composerActions: [skills, explicitSkills, plan],
         });
+        expect(clientFields("tlh")).toStrictEqual({
+          id: "tlh",
+          displayName: "TLH",
+          logoUrl: expectedLogoUrl(harness.deps.providerRegistry, "tlh"),
+          available: true,
+          maintenance: { health: true, usage: false, installation: true },
+          capabilities: {
+            supportsThreadArchive: false,
+            supportsThreadRename: false,
+            supportsServiceTier: false,
+            supportsNativeUserQuestion: false,
+            permissionModes: ["full"],
+            supportsFork: true,
+            supportsSessionRewind: true,
+            modelCatalogScope: "workspace",
+          },
+          composerActions: [skills, explicitSkills],
+        });
+        expect(clientFields("tlh-main")).toStrictEqual({
+          id: "tlh-main",
+          displayName: "TLH main",
+          logoUrl: expectedLogoUrl(harness.deps.providerRegistry, "tlh-main"),
+          available: true,
+          maintenance: { health: true, usage: false, installation: true },
+          capabilities: {
+            supportsThreadArchive: false,
+            supportsThreadRename: false,
+            supportsServiceTier: false,
+            supportsNativeUserQuestion: false,
+            permissionModes: ["full"],
+            supportsFork: true,
+            supportsSessionRewind: true,
+            modelCatalogScope: "workspace",
+          },
+          composerActions: [skills, explicitSkills],
+        });
         expect(clientFields("pi")).toStrictEqual({
           id: "pi",
-          displayName: "TLH",
+          displayName: "Pi",
           logoUrl: expectedLogoUrl(harness.deps.providerRegistry, "pi"),
           available: true,
           maintenance: { health: true, usage: false, installation: true },
@@ -364,10 +426,14 @@ describe("first-party provider plugins", () => {
         const registry = harness.deps.providerRegistry;
         await installFirstPartyProviderPlugins(harness);
         expect(registry.get("pi")?.pluginId).toBe("provider-pi");
+        expect(registry.get("tlh")?.pluginId).toBe("provider-pi");
+        expect(registry.get("tlh-main")?.pluginId).toBe("provider-pi");
 
         await harness.pluginService.setEnabled("provider-pi", false);
 
         expect(registry.get("pi")).toBeNull();
+        expect(registry.get("tlh")).toBeNull();
+        expect(registry.get("tlh-main")).toBeNull();
         expect(registry.getServerCapabilities("pi")).toBeNull();
         expect(registry.getSupportedPermissionModes("pi")).toBeNull();
         expect(registry.supportsFork("pi")).toBe(false);

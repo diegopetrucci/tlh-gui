@@ -373,7 +373,7 @@ describe("resolveSystemExecutionOptions", () => {
         responder.requests.filter(
           (request) => request.command.type === "provider.health",
         ),
-      ).toHaveLength(4);
+      ).toHaveLength(6);
       const modelRequest = responder.requests.find(
         (request) => request.command.type === "provider.list_models",
       );
@@ -444,7 +444,7 @@ describe("resolveSystemExecutionOptions", () => {
       expect(response.providers.map((provider) => provider.id)).toEqual([
         "codex",
         "claude-code",
-        "pi",
+        "tlh",
         "acp-cursor",
       ]);
       expect(response.modelLoadError).toEqual({
@@ -586,7 +586,7 @@ describe("resolveSystemExecutionOptions", () => {
             responder.requests.filter(
               (request) => request.command.type === "provider.health",
             ),
-          ).toHaveLength(failStatusRequest ? 0 : 4);
+          ).toHaveLength(failStatusRequest ? 0 : 6);
           expect(
             responder.requests.filter(
               (request) => request.command.type === "provider.list_models",
@@ -1095,7 +1095,7 @@ describe("resolveSystemExecutionOptions", () => {
           responder.requests.filter(
             (request) => request.command.type === "provider.health",
           ),
-        ).toHaveLength(4);
+        ).toHaveLength(6);
         const modelRequest = responder.requests.find(
           (request) => request.command.type === "provider.list_models",
         );
@@ -1144,7 +1144,7 @@ describe("resolveSystemExecutionOptions", () => {
         registry.markRegistrationsSettled();
 
         expect((await providersPromise).map((provider) => provider.id)).toEqual(
-          ["codex", "claude-code", "pi", "acp-cursor"],
+          ["codex", "claude-code", "tlh", "acp-cursor"],
         );
       },
     );
@@ -1181,6 +1181,7 @@ describe("resolveSystemExecutionOptions", () => {
 
         const response = await optionsPromise;
         expect(response.providers.map((provider) => provider.id)).toEqual([
+          "tlh",
           "pi",
         ]);
         expect(response.modelLoadError).toBeNull();

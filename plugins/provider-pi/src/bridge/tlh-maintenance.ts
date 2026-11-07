@@ -14,7 +14,13 @@ import {
   experimental_versionFrom as versionFrom,
 } from "@get-bb/plugin-sdk/provider-bridge";
 import { z } from "zod";
+import {
+  PI_BRIDGE_OPTIONS_BY_FLAVOR,
+  type PiBridgeOptions,
+} from "../bridge-options.js";
 import { resolvePiLaunch } from "./rpc-child.js";
+
+const DEFAULT_TLH_OPTIONS = PI_BRIDGE_OPTIONS_BY_FLAVOR.tlh;
 
 const execFileAsync = promisify(execFile);
 
@@ -23,6 +29,7 @@ const GITHUB_RELEASES_TIMEOUT_MS = 10_000;
 
 const REPO_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u;
 const DEFAULT_REPO = "diegopetrucci/the-last-harness";
+const TLH_REPO_URL = `https://github.com/${DEFAULT_REPO}`;
 
 const STRICT_SEMVER_RE =
   /^v?((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?)\s*$/u;
@@ -58,19 +65,18 @@ type TlhVersionJson = z.infer<typeof versionJsonSchema>;
 
 export type TlhInstallState = z.infer<typeof installStateSchema>;
 
-export function isTlhMode(): boolean {
-  const base = path.basename(resolvePiLaunch(process.env).command);
-  return base === "tlh" || base === "tlh.exe";
+function agentDir(options: PiBridgeOptions): string {
+  const configured = options.agentDir ?? "~/.the-last-harness/agent";
+  if (configured.startsWith("~/")) {
+    return path.join(os.homedir(), configured.slice(2));
+  }
+  return configured;
 }
 
-function agentDir(): string {
-  const envDir = process.env["PI_CODING_AGENT_DIR"];
-  if (envDir) return envDir;
-  return path.join(os.homedir(), ".the-last-harness", "agent");
-}
-
-export async function readTlhInstallState(): Promise<TlhInstallState | null> {
-  const stateFile = path.join(agentDir(), "tlh", "install-state.json");
+export async function readTlhInstallState(
+  options: PiBridgeOptions = DEFAULT_TLH_OPTIONS,
+): Promise<TlhInstallState | null> {
+  const stateFile = path.join(agentDir(options), "tlh", "install-state.json");
   let raw: string;
   try {
     raw = await readFile(stateFile, "utf8");
@@ -87,8 +93,10 @@ export async function readTlhInstallState(): Promise<TlhInstallState | null> {
   return result.success ? result.data : null;
 }
 
-async function probeTlhPiVersion(): Promise<string | null> {
-  const launch = resolvePiLaunch(process.env);
+async function probeTlhPiVersion(
+  options: PiBridgeOptions,
+): Promise<string | null> {
+  const launch = resolvePiLaunch(process.env, options);
   let stdout: string;
   try {
     ({ stdout } = await execFileAsync(
@@ -102,8 +110,10 @@ async function probeTlhPiVersion(): Promise<string | null> {
   return versionFrom(stdout);
 }
 
-async function probeTlhVersionJson(): Promise<TlhVersionJson | null> {
-  const launch = resolvePiLaunch(process.env);
+async function probeTlhVersionJson(
+  options: PiBridgeOptions,
+): Promise<TlhVersionJson | null> {
+  const launch = resolvePiLaunch(process.env, options);
   let stdout: string;
   try {
     ({ stdout } = await execFileAsync(
@@ -124,10 +134,10 @@ async function probeTlhVersionJson(): Promise<TlhVersionJson | null> {
   return result.success ? result.data : null;
 }
 
-async function resolveTlhRepo(): Promise<string> {
-  const versionJson = await probeTlhVersionJson();
+async function resolveTlhRepo(options: PiBridgeOptions): Promise<string> {
+  const versionJson = await probeTlhVersionJson(options);
   if (versionJson !== null) return versionJson.repo ?? DEFAULT_REPO;
-  return (await readTlhInstallState())?.repo ?? DEFAULT_REPO;
+  return (await readTlhInstallState(options))?.repo ?? DEFAULT_REPO;
 }
 
 export async function fetchTlhLatestRelease(
@@ -163,31 +173,39 @@ export function tlhInstallerCommand(
   return downloadedInstallerCommand(url);
 }
 
-export function tlhUpdateCommand(): ProviderInstallationCommand {
-  const launch = resolvePiLaunch(process.env);
+export function tlhUpdateCommand(
+  options: PiBridgeOptions = DEFAULT_TLH_OPTIONS,
+): ProviderInstallationCommand {
+  const launch = resolvePiLaunch(process.env, options);
   const command = launch.command;
   const args = [...launch.args, "update"];
   return { command, args, displayCommand: formatCommand(command, args) };
 }
 
-export async function tlhInstallGuidance(): Promise<string> {
-  const repo = await resolveTlhRepo();
+export async function tlhInstallGuidance(
+  options: PiBridgeOptions = DEFAULT_TLH_OPTIONS,
+): Promise<string> {
+  if (options.piFlavor === "tlh-main") {
+    return `Install ${options.command} from a The Last Harness main build: ${TLH_REPO_URL}`;
+  }
+  const repo = await resolveTlhRepo(options);
   return `Install The Last Harness (tlh): ${tlhInstallerCommand(repo).displayCommand}`;
 }
 
 export async function getTlhInstallationStatus(
   checkUpdates: boolean,
   minimumSupportedVersion: string,
+  options: PiBridgeOptions = DEFAULT_TLH_OPTIONS,
 ): Promise<ProviderInstallationStatus> {
-  const launch = resolvePiLaunch(process.env);
+  const launch = resolvePiLaunch(process.env, options);
   const [resolvedExecutable, versionJson, installState] = await Promise.all([
     resolveExecutablePath(launch.command),
-    probeTlhVersionJson(),
-    readTlhInstallState(),
+    probeTlhVersionJson(options),
+    readTlhInstallState(options),
   ]);
   const piVersion =
     (versionJson?.piVersion ? versionFrom(versionJson.piVersion) : null) ??
-    (await probeTlhPiVersion());
+    (await probeTlhPiVersion(options));
 
   const repo = versionJson
     ? (versionJson.repo ?? DEFAULT_REPO)
@@ -203,7 +221,7 @@ export async function getTlhInstallationStatus(
       ? strictSemver(installState.ref)
       : null;
   const latestVersion =
-    checkUpdates && track === "latest-release"
+    checkUpdates && options.piFlavor === "tlh" && track === "latest-release"
       ? await fetchTlhLatestRelease(repo)
       : null;
 
@@ -222,8 +240,11 @@ export async function getTlhInstallationStatus(
     piVersion !== null &&
     compareVersions(piVersion, minimumSupportedVersion) < 0;
 
+  const installable = options.piFlavor === "tlh";
   const actionKind = !installed
-    ? "install"
+    ? installable
+      ? "install"
+      : null
     : needsUpdate || versionUnsupported
       ? "update"
       : null;
@@ -232,7 +253,7 @@ export async function getTlhInstallationStatus(
     actionKind === "install"
       ? tlhInstallerCommand(repo).displayCommand
       : actionKind === "update"
-        ? tlhUpdateCommand().displayCommand
+        ? tlhUpdateCommand(options).displayCommand
         : null;
 
   const installAction: ProviderInstallationStatus["installAction"] =
@@ -248,7 +269,7 @@ export async function getTlhInstallationStatus(
         };
 
   return {
-    executableName: "tlh",
+    executableName: options.command,
     executablePath: resolvedExecutable,
     installed,
     installSource: "external",
@@ -266,13 +287,16 @@ export async function getTlhInstallationStatus(
 export async function tlhInstallationRun(
   status: ProviderInstallationStatus,
   action: "install" | "update",
+  options: PiBridgeOptions = DEFAULT_TLH_OPTIONS,
 ): Promise<{
   command: ProviderInstallationCommand;
   verification: ProviderInstallationVerification;
 }> {
-  const repo = await resolveTlhRepo();
+  const repo = await resolveTlhRepo(options);
   const command =
-    action === "install" ? tlhInstallerCommand(repo) : tlhUpdateCommand();
+    action === "install"
+      ? tlhInstallerCommand(repo)
+      : tlhUpdateCommand(options);
   let verification: ProviderInstallationVerification;
   if (action === "install") {
     verification = { kind: "installed" };
@@ -282,14 +306,4 @@ export async function tlhInstallationRun(
     verification = { kind: "installed" };
   }
   return { command, verification };
-}
-
-export function tlhNotInstalledMessage(): string {
-  return isTlhMode()
-    ? "Could not find the tlh CLI on this host. Install The Last Harness from https://github.com/diegopetrucci/the-last-harness and retry."
-    : "Could not find the pi CLI on this host. Install @earendil-works/pi-coding-agent and retry.";
-}
-
-export function piLoginCommand(): string {
-  return isTlhMode() ? "tlh" : "pi";
 }
