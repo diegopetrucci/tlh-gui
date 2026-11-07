@@ -1,13 +1,21 @@
 # Pi provider
 
 First-party plugin for the [Pi coding agent](https://github.com/earendil-works/pi/tree/main/packages/coding-agent).
+The plugin registers three providers that share one bridge:
+
+| Id         | Label    | Command    | Shown                        | Install / updates                                       |
+| ---------- | -------- | ---------- | ---------------------------- | ------------------------------------------------------- |
+| `tlh`      | TLH      | `tlh`      | Always; default on fresh installs (saved preferences win) | TLH installer, `tlh update`, release checks |
+| `tlh-main` | TLH main | `tlh-main` | Only where installed         | No Install action, no release-update checks             |
+| `pi`       | Pi       | `pi`       | Only where installed         | Upstream npm install/update                             |
+
 Pi is user-installed (`npm install -g @earendil-works/pi-coding-agent`, 0.84.0
 or newer); the plugin ships no agent tree.
 
 What lives here:
 
-- `server.ts` — the plugin's runtime: one `bb.providers.register` for `pi`
-  (`src/declaration.ts`).
+- `server.ts` — the plugin's runtime: one `bb.providers.register` per flavor
+  (`tlh`, `tlh-main`, `pi`; `src/declaration.ts`, `src/bridge-options.ts`).
 - `src/host.ts` — the `bb.host` artifact, two surfaces in one file: the
   provider bridge (`src/bridge/`, a thin bridge over `pi --mode rpc` plus the
   bb extension pi loads) and the host entry that answers `resolveNativeRoots`
@@ -59,14 +67,17 @@ Pi's skill layout is the plugin's fact, so bb lists pi's skills beside its
 own and core holds no pi policy. The registration declares the documented
 directories (`experimental_nativeSkillRoots`):
 
-- `user`: `.pi/agent/skills` and `.agents/skills` under the host's home.
+- `user`: `<agent dir>/skills` and `.agents/skills` under the host's home. The
+  agent dir is `~/.the-last-harness/agent` for `tlh`,
+  `~/.the-last-harness-main/agent` for `tlh-main`, and `~/.pi/agent` for `pi`.
 - `project`: `.pi/skills` and `.agents/skills` under the workspace.
 
 The directories only a host knows are the host entry's answer
 (`experimental_resolvesNativeRoots`): when bb lists skills on a host it asks
 the plugin's host entry there, which reads `<agentDir>/settings.json`'s
 `skills` entries (absolute, `~`-relative, or relative to the agent dir) and
-adds `<agentDir>/skills` when `PI_CODING_AGENT_DIR` moves the agent dir. Each
+adds `<agentDir>/skills` when `PI_CODING_AGENT_DIR` moves the pi agent dir
+(`tlh` and `tlh-main` ignore `PI_CODING_AGENT_DIR`). Each
 host answers for itself, from its own files, at listing time (bb caches the
 answer briefly). A settings entry that names a declared directory is listed
 once: bb scans each directory once, and the declared root wins.
@@ -85,11 +96,34 @@ Not listed, by design:
 
 ## Environment
 
-`BB_PI_BRIDGE_COMMAND` and `BB_PI_BRIDGE_ARGS` point the bridge (and its
-version probe) at a pi executable other than the `pi` on `PATH` — a pinned
-install in a temporary prefix, say. The plugin declares them as environment
+`BB_PI_BRIDGE_COMMAND` and `BB_PI_BRIDGE_ARGS` point the `pi` provider's bridge
+(and its version probe) at a pi executable other than the `pi` on `PATH` — a
+pinned install in a temporary prefix, say. They do not affect `tlh` or
+`tlh-main`, which always launch their own command. The plugin declares them as environment
 passthrough, so a value set on the host daemon's environment reaches the
 bridge process; bb strips every other inherited `BB_*` variable.
+
+## Provider-id relabel on upgrade
+
+Before the three-provider split, the fork's `pi` provider id meant TLH. On the
+first start after upgrading, bb relabels legacy `pi` to `tlh` once: threads,
+project execution defaults, pending interactions, provider settings
+(`providerOrder`, `defaultProviderId`, `disabledProviderIds`,
+`providerCompletedTurnDisplay`), and automations' `execution.providerId`. `pi`
+model catalogs are dropped and re-fetched; thread events are unchanged. Before
+changing anything, bb copies the database to `<db>.pre-tlh-provider-ids.bak`
+(`.1`, `.2`, … if that name exists). To undo, stop bb and restore that file
+over the database; downgrading requires the same restore. The automations
+plugin database (`~/.bb/plugins/automations/data.db`) is relabelled without a
+backup, so that restore does not revert it. To revert automations on downgrade,
+stop bb and run:
+
+```sh
+sqlite3 ~/.bb/plugins/automations/data.db "UPDATE automations SET execution = json_set(execution, '\$.providerId', 'pi') WHERE json_valid(execution) AND json_extract(execution, '\$.providerId') = 'tlh';"
+```
+
+This also rewrites automations you created as `tlh` after upgrading. A fresh
+install gets no relabel and no backup.
 
 ## Tests
 

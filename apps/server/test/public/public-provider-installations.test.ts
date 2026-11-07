@@ -77,8 +77,8 @@ function installationStatus(providerId: string) {
       ? "claude"
       : providerId === "acp-cursor"
         ? "cursor-agent"
-        : providerId === "pi"
-          ? "pi"
+        : providerId === "tlh"
+          ? "tlh"
           : "codex";
   return {
     executableName,
@@ -223,7 +223,7 @@ describe("public provider installation routes", () => {
       expect(Object.keys(body)).toEqual([
         "codex",
         "claude-code",
-        "pi",
+        "tlh",
         "acp-cursor",
       ]);
       expect(Object.values(body).map((status) => status.displayName)).toEqual([
@@ -240,7 +240,7 @@ describe("public provider installation routes", () => {
               ? request.command.providerId
               : null,
           ),
-      ).toEqual([]);
+      ).toEqual(["tlh-main", "pi"]);
       expect(
         responder.requests
           .filter(
@@ -252,7 +252,7 @@ describe("public provider installation routes", () => {
               ? request.command.providerId
               : null,
           ),
-      ).toEqual(["codex", "claude-code", "pi", "acp-cursor"]);
+      ).toEqual(["codex", "claude-code", "tlh", "acp-cursor"]);
     });
   });
 
@@ -287,7 +287,7 @@ describe("public provider installation routes", () => {
 
       expect(response.status).toBe(200);
       const body = (await readJson(response)) as ProviderCliStatusResponse;
-      expect(Object.keys(body)).toEqual(["codex", "pi", "acp-cursor"]);
+      expect(Object.keys(body)).toEqual(["codex", "tlh", "acp-cursor"]);
       expect(Object.values(body).map((status) => status.displayName)).toEqual([
         "Codex",
         "TLH",

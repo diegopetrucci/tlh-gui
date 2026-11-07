@@ -187,3 +187,128 @@ it("memoizes the install gate per launch path across health polls", async () => 
       .filter((line) => line.startsWith("version:")),
   ).toHaveLength(2);
 }, 30_000);
+
+const tlhMainBridgeOptions = {
+  piFlavor: "tlh-main",
+  displayName: "TLH main",
+  command: "tlh-main",
+  loginCommand: "tlh-main",
+  maintenance: "tlh",
+  agentDir: "~/.the-last-harness-main/agent",
+};
+
+it("ignores BB_PI_BRIDGE_COMMAND for the tlh-main flavor and reports its own CLI as missing", async () => {
+  vi.stubEnv("PATH", harness.workspaceDir);
+  const health = await harness.request(nextRequestId(), "provider/health", {
+    providerId: "tlh-main",
+    cwd: harness.workspaceDir,
+    providerOptions: tlhMainBridgeOptions,
+  });
+  expect(health.result).toMatchObject({
+    health: { status: "not_installed", loginCommand: "tlh-main" },
+  });
+  const models = await harness.request(nextRequestId(), "model/list", {
+    cwd: harness.workspaceDir,
+    providerOptions: tlhMainBridgeOptions,
+  });
+  expect(models.error).toMatchObject({
+    code: BRIDGE_JSON_RPC_ERRORS.MISSING_EXECUTABLE,
+    message: expect.stringContaining("tlh-main CLI"),
+  });
+  const status = await harness.request(
+    nextRequestId(),
+    "provider/installation/status",
+    {
+      providerId: "tlh-main",
+      checkUpdates: false,
+      providerOptions: tlhMainBridgeOptions,
+    },
+  );
+  expect(status.result).toMatchObject({
+    executableName: "tlh-main",
+    installed: false,
+    installAction: null,
+  });
+}, 30_000);
+
+it("rejects invalid flavor options and a second flavor on the same process", async () => {
+  const invalid = await harness.request(nextRequestId(), "provider/health", {
+    providerId: "tlh",
+    providerOptions: { piFlavor: "tlh" },
+  });
+  expect(invalid.error?.message).toContain(
+    "Invalid provider-pi bridge options",
+  );
+  const first = await harness.request(nextRequestId(), "provider/health", {
+    providerId: "tlh-main",
+    cwd: harness.workspaceDir,
+    providerOptions: tlhMainBridgeOptions,
+  });
+  expect(first.error).toBeUndefined();
+  const second = await harness.request(nextRequestId(), "provider/health", {
+    providerId: "pi",
+    cwd: harness.workspaceDir,
+    providerOptions: { ...tlhMainBridgeOptions, piFlavor: "pi" },
+  });
+  expect(second.error?.message).toContain("bound to the tlh-main flavor");
+}, 30_000);
+
+it.each([
+  ["tlh", "TLH"],
+  ["tlh-main", "TLH main"],
+])(
+  "resolves the %s flavor from providerId when no providerOptions are sent",
+  async (providerId, displayName) => {
+    vi.stubEnv("PATH", harness.workspaceDir);
+    const health = await harness.request(nextRequestId(), "provider/health", {
+      providerId,
+      cwd: harness.workspaceDir,
+    });
+    expect(health.result).toMatchObject({
+      health: { status: "not_installed", loginCommand: providerId },
+    });
+    const status = await harness.request(
+      nextRequestId(),
+      "provider/installation/status",
+      { providerId, checkUpdates: false },
+    );
+    expect(status.result).toMatchObject({
+      executableName: providerId,
+      installed: false,
+    });
+    const run = await harness.request(
+      nextRequestId(),
+      "provider/installation/run",
+      { providerId, action: "install" },
+    );
+    expect(JSON.stringify(run)).not.toContain('"pi"');
+    const models = await harness.request(nextRequestId(), "model/list", {
+      cwd: harness.workspaceDir,
+    });
+    expect(models.error).toMatchObject({
+      code: BRIDGE_JSON_RPC_ERRORS.MISSING_EXECUTABLE,
+      message: expect.stringContaining(providerId),
+    });
+    expect(displayName.length).toBeGreaterThan(0);
+  },
+  30_000,
+);
+
+it("lets providerId win when providerOptions lack piFlavor", async () => {
+  vi.stubEnv("PATH", harness.workspaceDir);
+  const health = await harness.request(nextRequestId(), "provider/health", {
+    providerId: "tlh-main",
+    cwd: harness.workspaceDir,
+    providerOptions: { unrelated: true },
+  });
+  expect(health.result).toMatchObject({
+    health: { status: "not_installed", loginCommand: "tlh-main" },
+  });
+}, 30_000);
+
+it("keeps the pi default for model/list with neither options nor providerId", async () => {
+  const models = await harness.request(nextRequestId(), "model/list", {
+    cwd: harness.workspaceDir,
+  });
+  expect(models.error).toBeUndefined();
+}, 30_000);

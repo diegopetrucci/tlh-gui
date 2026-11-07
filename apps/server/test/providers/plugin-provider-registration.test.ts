@@ -340,6 +340,8 @@ describe("buildPluginProviderRegistration", () => {
     expect(Object.fromEntries(projected)).toStrictEqual({
       codex: "collapse",
       "claude-code": "flat",
+      tlh: "collapse",
+      "tlh-main": "collapse",
       pi: "collapse",
       "acp-cursor": "collapse",
       "acp-opencode": "collapse",

@@ -1304,6 +1304,176 @@ function seedKeepAwakePluginConfiguration(db: DbConnection): void {
   `);
 }
 
+const TLH_PROVIDER_ID_RELABEL_MARKER_KEY = "tlhProviderIdRelabelCompletedAt";
+const LEGACY_PI_PROVIDER_ID = "pi";
+const TLH_PROVIDER_ID = "tlh";
+const TLH_PROVIDER_ID_RELABEL_BACKUP_SUFFIX = ".pre-tlh-provider-ids.bak";
+const relabeledProviderIdTables = [
+  "threads",
+  "project_execution_defaults",
+  "pending_interactions",
+] as const;
+
+interface AppSettingValueRow {
+  key: string;
+  value: string;
+}
+
+function relabelProviderIdList(value: unknown): unknown[] | null {
+  if (!Array.isArray(value) || !value.includes(LEGACY_PI_PROVIDER_ID)) {
+    return null;
+  }
+  const relabeled: unknown[] = [];
+  for (const entry of value) {
+    const next = entry === LEGACY_PI_PROVIDER_ID ? TLH_PROVIDER_ID : entry;
+    if (!relabeled.includes(next)) relabeled.push(next);
+  }
+  return relabeled;
+}
+
+function relabelProviderSetting(key: string, value: unknown): unknown {
+  switch (key) {
+    case "providerOrder":
+    case "disabledProviderIds":
+      return relabelProviderIdList(value);
+    case "defaultProviderId":
+      return value === LEGACY_PI_PROVIDER_ID ? TLH_PROVIDER_ID : null;
+    case "providerCompletedTurnDisplay": {
+      if (
+        !isObject(value) ||
+        Array.isArray(value) ||
+        !(LEGACY_PI_PROVIDER_ID in value)
+      ) {
+        return null;
+      }
+      const { [LEGACY_PI_PROVIDER_ID]: legacyValue, ...rest } = value;
+      return TLH_PROVIDER_ID in rest
+        ? rest
+        : { ...rest, [TLH_PROVIDER_ID]: legacyValue };
+    }
+    default:
+      return null;
+  }
+}
+
+function parseSettingJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
+function readProviderSettingRelabels(
+  db: DbConnection,
+): Array<{ key: string; value: string }> {
+  if (!tableExists(db, "app_settings_values")) {
+    return [];
+  }
+  const rows = db.$client
+    .prepare<[], AppSettingValueRow>(
+      `
+        SELECT key, value
+        FROM app_settings_values
+        WHERE key IN (
+          'providerOrder',
+          'defaultProviderId',
+          'disabledProviderIds',
+          'providerCompletedTurnDisplay'
+        )
+      `,
+    )
+    .all();
+  const relabels: Array<{ key: string; value: string }> = [];
+  for (const row of rows) {
+    const next = relabelProviderSetting(row.key, parseSettingJson(row.value));
+    if (next !== null) {
+      relabels.push({ key: row.key, value: JSON.stringify(next) });
+    }
+  }
+  return relabels;
+}
+
+function hasLegacyProviderRows(db: DbConnection, tableName: string): boolean {
+  return (
+    tableExists(db, tableName) &&
+    columnExists(db, tableName, "provider_id") &&
+    db.$client
+      .prepare(`SELECT 1 FROM ${tableName} WHERE provider_id = ? LIMIT 1`)
+      .get(LEGACY_PI_PROVIDER_ID) !== undefined
+  );
+}
+
+function resolveProviderIdRelabelBackupPath(databasePath: string): string {
+  const basePath = `${databasePath}${TLH_PROVIDER_ID_RELABEL_BACKUP_SUFFIX}`;
+  let candidate = basePath;
+  for (let index = 1; existsSync(candidate); index += 1) {
+    candidate = `${basePath}.${index}`;
+  }
+  return candidate;
+}
+
+function relabelLegacyPiProviderIds(db: DbConnection): void {
+  if (!tableExists(db, "app_settings_values")) {
+    return;
+  }
+  const sqlite = db.$client;
+  const marker = sqlite
+    .prepare<
+      [string],
+      AppSettingValueRow
+    >("SELECT key, value FROM app_settings_values WHERE key = ?")
+    .get(TLH_PROVIDER_ID_RELABEL_MARKER_KEY);
+  if (marker !== undefined) {
+    return;
+  }
+
+  const settingRelabels = readProviderSettingRelabels(db);
+  const hasLegacyData =
+    settingRelabels.length > 0 ||
+    hasLegacyProviderRows(db, "provider_model_catalogs") ||
+    relabeledProviderIdTables.some((tableName) =>
+      hasLegacyProviderRows(db, tableName),
+    );
+
+  if (hasLegacyData && sqlite.name !== ":memory:" && sqlite.name !== "") {
+    sqlite
+      .prepare("VACUUM INTO ?")
+      .run(resolveProviderIdRelabelBackupPath(sqlite.name));
+  }
+
+  const now = Date.now();
+  sqlite.transaction(() => {
+    if (hasLegacyData) {
+      for (const tableName of relabeledProviderIdTables) {
+        if (!hasLegacyProviderRows(db, tableName)) continue;
+        sqlite
+          .prepare(
+            `UPDATE ${tableName} SET provider_id = ? WHERE provider_id = ?`,
+          )
+          .run(TLH_PROVIDER_ID, LEGACY_PI_PROVIDER_ID);
+      }
+      if (tableExists(db, "provider_model_catalogs")) {
+        sqlite
+          .prepare("DELETE FROM provider_model_catalogs WHERE provider_id = ?")
+          .run(LEGACY_PI_PROVIDER_ID);
+      }
+      for (const relabel of settingRelabels) {
+        sqlite
+          .prepare(
+            "UPDATE app_settings_values SET value = ?, updated_at = ? WHERE key = ?",
+          )
+          .run(relabel.value, now, relabel.key);
+      }
+    }
+    sqlite
+      .prepare(
+        "INSERT INTO app_settings_values (key, value, updated_at) VALUES (?, ?, ?)",
+      )
+      .run(TLH_PROVIDER_ID_RELABEL_MARKER_KEY, JSON.stringify(now), now);
+  })();
+}
+
 function warnAboutFutureAppliedMigrations(
   db: DbConnection,
   options: MigrateOptions,
@@ -1462,6 +1632,7 @@ export function migrate(db: DbConnection, options: MigrateOptions = {}): void {
     }
     applyReorderedCleanupMigrations(db, migrationsFolder);
     seedKeepAwakePluginConfiguration(db);
+    relabelLegacyPiProviderIds(db);
   } finally {
     sqlite.pragma("foreign_keys = ON");
   }

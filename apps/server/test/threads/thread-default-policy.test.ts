@@ -98,6 +98,8 @@ describe("resolveCreateThreadExecutionDefaults", () => {
       executionDefaults: null,
       providerFallbackCandidates: [
         "claude-code",
+        "tlh",
+        "tlh-main",
         "pi",
         "acp-cursor",
         "acp-opencode",
@@ -110,7 +112,7 @@ describe("resolveCreateThreadExecutionDefaults", () => {
 
   it("honors the user's default provider and picker order", async () => {
     const preferences = {
-      providerOrder: ["pi", "claude-code"],
+      providerOrder: ["tlh", "claude-code"],
       defaultProviderId: null as string | null,
     };
     const userRegistry = createProviderRegistryService({
@@ -119,9 +121,11 @@ describe("resolveCreateThreadExecutionDefaults", () => {
     await registerFirstPartyProviders(userRegistry);
 
     expect(userRegistry.list().map((entry) => entry.info.id)).toEqual([
-      "pi",
+      "tlh",
       "claude-code",
       "codex",
+      "tlh-main",
+      "pi",
       "acp-cursor",
       "acp-opencode",
       "acp-omp",
@@ -132,7 +136,7 @@ describe("resolveCreateThreadExecutionDefaults", () => {
       resolveCreateThreadExecutionDefaults(userRegistry, {
         storedDefaults: null,
       }).providerId,
-    ).toBe("pi");
+    ).toBe("tlh");
 
     preferences.defaultProviderId = "codex";
     expect(
@@ -145,12 +149,12 @@ describe("resolveCreateThreadExecutionDefaults", () => {
       resolveCreateThreadExecutionDefaults(userRegistry, {
         storedDefaults: null,
       }).providerId,
-    ).toBe("pi");
+    ).toBe("tlh");
   });
 
   it("orders fallback candidates behind the chosen default, preferred provider first", async () => {
     const preferences = {
-      providerOrder: ["pi", "claude-code"],
+      providerOrder: ["tlh", "claude-code"],
       defaultProviderId: "codex" as string | null,
     };
     const userRegistry = createProviderRegistryService({
@@ -163,8 +167,10 @@ describe("resolveCreateThreadExecutionDefaults", () => {
         storedDefaults: null,
       }).providerFallbackCandidates,
     ).toEqual([
-      "pi",
+      "tlh",
       "claude-code",
+      "tlh-main",
+      "pi",
       "acp-cursor",
       "acp-opencode",
       "acp-omp",
@@ -237,6 +243,8 @@ describe("resolveCreateThreadExecutionDefaults", () => {
       providerId: "claude-code",
       executionDefaults: null,
       providerFallbackCandidates: [
+        "tlh",
+        "tlh-main",
         "pi",
         "acp-cursor",
         "acp-opencode",

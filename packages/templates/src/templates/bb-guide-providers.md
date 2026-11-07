@@ -56,6 +56,14 @@ the failure code, and the underlying host message on stderr, then reports the
 empty catalog on stdout. The model pickers show the same underlying message
 beneath their summary line.
 
+The Pi plugin supplies three providers: tlh (The Last Harness, always shown and
+the default on fresh installs), tlh-main (a main-branch build, shown only where
+its tlh-main CLI is installed) and pi (upstream Pi, shown only where its pi CLI
+is installed). Select one with `bb thread spawn --provider <id>`; `bb provider
+list` shows which are available on a machine. BB_PI_BRIDGE_COMMAND and
+BB_PI_BRIDGE_ARGS override the launch command for pi only; tlh and tlh-main
+always run their own CLI.
+
 Enabling and disabling providers
 
 Manage agents in Settings → Providers. Install provider plugins in Settings →

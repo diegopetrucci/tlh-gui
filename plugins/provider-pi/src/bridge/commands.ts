@@ -1,5 +1,9 @@
 import type { commandListResultSchema } from "@get-bb/plugin-sdk/provider-bridge";
 import { z } from "zod";
+import {
+  DEFAULT_PI_BRIDGE_OPTIONS,
+  type PiBridgeOptions,
+} from "../bridge-options.js";
 import { PiRpcChild, buildPiChildEnv } from "./rpc-child.js";
 
 type CommandListResult = z.infer<typeof commandListResultSchema>;
@@ -63,10 +67,12 @@ export function toPiCommandList(data: unknown): CommandListResult {
 export async function listPiCommands(
   cwd: string,
   extensionPath: string,
+  bridgeOptions: PiBridgeOptions = DEFAULT_PI_BRIDGE_OPTIONS,
 ): Promise<CommandListResult> {
   const child = new PiRpcChild({
     cwd,
     env: buildPiChildEnv({}),
+    bridgeOptions,
     args: ["--mode", "rpc", "--no-session", "--extension", extensionPath],
     onEvent: () => {},
     onChannelMessage: () => {},

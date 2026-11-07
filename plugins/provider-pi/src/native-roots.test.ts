@@ -3,7 +3,10 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { experimental_nativeRootsResolveOutputSchema } from "@get-bb/plugin-sdk/host";
 import { afterEach, beforeEach, expect, it } from "vitest";
-import { resolvePiNativeRoots } from "./native-roots.js";
+import {
+  piNativeRootsDeclaration,
+  resolvePiNativeRoots,
+} from "./native-roots.js";
 
 let homeDir: string;
 
@@ -99,4 +102,41 @@ it("never answers a root the contract would refuse", async () => {
       join(homeDir, "team-skills"),
     ].sort(),
   );
+});
+
+it.each([
+  ["tlh", ".the-last-harness"],
+  ["tlh-main", ".the-last-harness-main"],
+] as const)(
+  "%s reads its own profile and ignores PI_CODING_AGENT_DIR",
+  async (flavor, dir) => {
+    const agentDir = join(homeDir, dir, "agent");
+    writeSettings(agentDir, { skills: ["extra"] });
+    const piDir = join(homeDir, "stray");
+    writeSettings(piDir, { skills: ["stray-skills"] });
+    for (const env of [{}, { PI_CODING_AGENT_DIR: piDir }]) {
+      const answer = await resolvePiNativeRoots({ homeDir, env, flavor });
+      expect(answer.skills?.map((root) => root.path)).toEqual([
+        join(agentDir, "extra"),
+      ]);
+    }
+    expect(
+      piNativeRootsDeclaration(flavor).experimental_nativeSkillRoots?.user,
+    ).toContainEqual({ path: `${dir}/agent/skills`, recursive: true });
+  },
+);
+
+it("pi declares ~/.pi/agent/skills and honours PI_CODING_AGENT_DIR", async () => {
+  expect(
+    piNativeRootsDeclaration("pi").experimental_nativeSkillRoots?.user,
+  ).toContainEqual({ path: ".pi/agent/skills", recursive: true });
+  const agentDir = join(homeDir, "custom-agent");
+  const answer = await resolvePiNativeRoots({
+    homeDir,
+    env: { PI_CODING_AGENT_DIR: agentDir },
+    flavor: "pi",
+  });
+  expect(answer.skills?.map((root) => root.path)).toEqual([
+    join(agentDir, "skills"),
+  ]);
 });

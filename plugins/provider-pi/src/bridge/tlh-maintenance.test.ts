@@ -57,15 +57,15 @@ vi.mock("@get-bb/plugin-sdk/provider-bridge", async (importOriginal) => {
   };
 });
 
+import os from "node:os";
+import path from "node:path";
+import { PI_BRIDGE_OPTIONS_BY_FLAVOR } from "../bridge-options.js";
 import {
   fetchTlhLatestRelease,
   getTlhInstallationStatus,
-  isTlhMode,
-  piLoginCommand,
   readTlhInstallState,
   tlhInstallerCommand,
   tlhInstallationRun,
-  tlhNotInstalledMessage,
   tlhUpdateCommand,
 } from "./tlh-maintenance.js";
 
@@ -104,28 +104,6 @@ afterEach(() => {
   mockState.resolvedExecutable = null;
   mockState.fetchResult = null;
   vi.restoreAllMocks();
-});
-
-describe("isTlhMode", () => {
-  it("returns true when command basename is tlh", () => {
-    mockState.command = "tlh";
-    expect(isTlhMode()).toBe(true);
-  });
-
-  it("returns true when command is a full path ending in tlh", () => {
-    mockState.command = "/usr/local/bin/tlh";
-    expect(isTlhMode()).toBe(true);
-  });
-
-  it("returns false when command is pi", () => {
-    mockState.command = "pi";
-    expect(isTlhMode()).toBe(false);
-  });
-
-  it("returns false when command is node", () => {
-    mockState.command = "/usr/bin/node";
-    expect(isTlhMode()).toBe(false);
-  });
 });
 
 describe("readTlhInstallState", () => {
@@ -167,12 +145,16 @@ describe("readTlhInstallState", () => {
     });
   });
 
-  it("uses PI_CODING_AGENT_DIR env when set", async () => {
+  it("ignores PI_CODING_AGENT_DIR for the tlh flavor", async () => {
     vi.stubEnv("PI_CODING_AGENT_DIR", "/custom/agent");
     const { readFile } = await import("node:fs/promises");
     mockState.readFileResult = validInstallState;
     await readTlhInstallState();
     expect(readFile).toHaveBeenCalledWith(
+      expect.stringContaining(".the-last-harness"),
+      "utf8",
+    );
+    expect(readFile).not.toHaveBeenCalledWith(
       expect.stringContaining("/custom/agent"),
       "utf8",
     );
@@ -945,27 +927,63 @@ describe("getTlhInstallationStatus — Windows (win32)", () => {
   });
 });
 
-describe("mode-aware string helpers", () => {
-  it("tlhNotInstalledMessage returns tlh string in tlh mode", () => {
-    mockState.command = "tlh";
-    expect(tlhNotInstalledMessage()).toContain("tlh CLI");
-    expect(tlhNotInstalledMessage()).toContain("The Last Harness");
+describe("tlh-main flavor", () => {
+  const tlhMain = PI_BRIDGE_OPTIONS_BY_FLAVOR["tlh-main"];
+
+  beforeEach(() => {
+    mockState.command = "tlh-main";
+    mockState.resolvedExecutable = "/usr/local/bin/tlh-main";
+    mockState.versionJsonResult = JSON.stringify({
+      schemaVersion: 1,
+      tlhVersion: "0.10.0",
+      piVersion: "0.84.0",
+      track: "ref",
+      ref: "main",
+      repo: "diegopetrucci/the-last-harness",
+      agentDir: "/home/u/.the-last-harness-main/agent",
+    });
   });
 
-  it("tlhNotInstalledMessage returns upstream pi string in non-tlh mode", () => {
-    mockState.command = "pi";
-    expect(tlhNotInstalledMessage()).toBe(
-      "Could not find the pi CLI on this host. Install @earendil-works/pi-coding-agent and retry.",
+  it("reports the tlh-main executable and never checks for releases", async () => {
+    const fetchSpy = makeFetchMock({ tag_name: "v9.9.9" });
+    vi.stubGlobal("fetch", fetchSpy);
+    const status = await getTlhInstallationStatus(true, "0.84.0", tlhMain);
+    expect(status).toMatchObject({
+      executableName: "tlh-main",
+      installed: true,
+      latestVersion: null,
+      needsUpdate: false,
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("offers no installer when tlh-main is missing", async () => {
+    mockState.resolvedExecutable = null;
+    mockState.versionJsonResult = null;
+    const status = await getTlhInstallationStatus(true, "0.84.0", tlhMain);
+    expect(status).toMatchObject({ installed: false, installAction: null });
+  });
+
+  it("updates through tlh-main", () => {
+    expect(tlhUpdateCommand(tlhMain).displayCommand).toBe("tlh-main update");
+  });
+
+  it("reads install state from the tlh-main profile and ignores PI_CODING_AGENT_DIR", async () => {
+    vi.stubEnv("PI_CODING_AGENT_DIR", "/tlh/profile");
+    mockState.readFileResult = validInstallState;
+    const readFile = (await import("node:fs/promises")).readFile as ReturnType<
+      typeof vi.fn
+    >;
+    await readTlhInstallState(tlhMain);
+    expect(String(readFile.mock.calls.at(-1)?.[0])).toBe(
+      path.join(
+        os.homedir(),
+        ".the-last-harness-main",
+        "agent",
+        "tlh",
+        "install-state.json",
+      ),
     );
-  });
-
-  it("piLoginCommand returns 'tlh' in tlh mode", () => {
-    mockState.command = "tlh";
-    expect(piLoginCommand()).toBe("tlh");
-  });
-
-  it("piLoginCommand returns 'pi' in non-tlh mode", () => {
-    mockState.command = "pi";
-    expect(piLoginCommand()).toBe("pi");
+    vi.unstubAllEnvs();
   });
 });

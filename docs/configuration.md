@@ -551,7 +551,8 @@ restart bb. `bb-app config list` prints the entries.
 }
 ```
 
-`providerId` accepts `codex`, `claude-code`, `pi`, `acp-cursor`, or any
+`providerId` accepts `codex`, `claude-code`, `tlh`, `tlh-main`, `pi`,
+`acp-cursor`, or any
 `acp-*` provider id. `displayName` is optional. bb skips an invalid entry with
 a warning. Entries appear after the provider's own catalog in the model picker
 and `bb provider models`; the provider catalog wins on an id collision, and
@@ -616,6 +617,8 @@ declare:
 | ------------ | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | Codex        | `~/.agents/skills`, `$CODEX_HOME/skills`                                                                 | `.agents/skills` from the repository root to the current directory, plus `.codex/skills`                     |
 | Claude Code  | `$CLAUDE_CONFIG_DIR/skills` or `~/.claude/skills`, plus enabled plugin skills                            | `.claude/skills` from the repository root to the current directory, plus enabled plugin skills               |
+| TLH          | `~/.the-last-harness/agent/skills`, `~/.agents/skills`                                                   | `.pi/skills` in the workspace; `.agents/skills` from the repository root to the current directory            |
+| TLH main     | `~/.the-last-harness-main/agent/skills`, `~/.agents/skills`                                              | `.pi/skills` in the workspace; `.agents/skills` from the repository root to the current directory            |
 | Pi           | `~/.pi/agent/skills`, `~/.agents/skills`                                                                 | `.pi/skills` in the workspace; `.agents/skills` from the repository root to the current directory            |
 | Cursor       | `~/.cursor/skills`, `~/.agents/skills`, `~/.claude/skills`, `~/.codex/skills`                            | The same four roots in the workspace                                                                         |
 | OpenCode     | `~/.config/opencode/skills`, `~/.claude/skills`, `~/.agents/skills`                                      | `.opencode/skills`, `.claude/skills`, and `.agents/skills` from the repository root to the current directory |
@@ -624,12 +627,22 @@ declare:
 | Hermes Agent | `$HERMES_HOME/skills` or `~/.hermes/skills`                                                              | None                                                                                                         |
 
 OpenCode also uses `$OPENCODE_CONFIG_DIR/skills`. Pi and omp use
-`$PI_CODING_AGENT_DIR`; omp selects its profile with `$OMP_PROFILE` or
+`$PI_CODING_AGENT_DIR` (TLH and TLH main ignore it); omp selects its profile with `$OMP_PROFILE` or
 `$PI_PROFILE`. Cursor and Hermes roots are scanned recursively, and Pi finds
 skills at any depth under its roots. Pi settings
 and packages, omp's `skills.customDirectories`, Hermes' `skills.external_dirs`,
 and Grok's `[skills].paths` in `config.toml` add paths; Grok also reads enabled
 Grok and Claude-compatible plugin skills.
+
+### TLH, TLH main and Pi providers
+
+The `tlh` provider is always shown and is the default on fresh installs (a saved
+default provider or provider order wins). `tlh-main` and `pi` are shown only on
+machines where they are installed. `BB_PI_BRIDGE_COMMAND` and
+`BB_PI_BRIDGE_ARGS` affect only `pi`. Use `--provider tlh|tlh-main|pi` on the
+CLI; `--provider pi` now means upstream Pi, not TLH. See
+`plugins/provider-pi/README.md` for the one-time `pi` to `tlh` relabel and its
+backup.
 
 ## Multi-machine
 

@@ -10,6 +10,10 @@ import {
   withoutBridgeRuntimeEnv,
 } from "@get-bb/plugin-sdk/provider-bridge";
 
+import {
+  DEFAULT_PI_BRIDGE_OPTIONS,
+  type PiBridgeOptions,
+} from "../bridge-options.js";
 import { resolveWindowsPiProcessLaunch } from "./windows-pi-launch.js";
 
 export const PI_BRIDGE_COMMAND_ENV = "BB_PI_BRIDGE_COMMAND";
@@ -46,6 +50,7 @@ export interface SpawnPiRpcChildArgs {
   onChannelMessage: (message: Record<string, unknown>) => void;
   onExit: (info: PiRpcChildExitInfo) => void;
   recordThreadId: string | null;
+  bridgeOptions?: PiBridgeOptions;
   onExtensionUiRequest?: (request: Record<string, unknown>) => void;
 }
 
@@ -66,13 +71,19 @@ interface PendingRequest {
   timer: ReturnType<typeof setTimeout> | null;
 }
 
-export function resolvePiLaunch(env: NodeJS.ProcessEnv): {
+export function resolvePiLaunch(
+  env: NodeJS.ProcessEnv,
+  options: PiBridgeOptions = DEFAULT_PI_BRIDGE_OPTIONS,
+): {
   command: string;
   args: string[];
 } {
+  if (options.piFlavor !== "pi") {
+    return { command: options.command, args: [] };
+  }
   const command = env[PI_BRIDGE_COMMAND_ENV];
   if (!command) {
-    return { command: "tlh", args: [] };
+    return { command: options.command, args: [] };
   }
   const rawArgs = env[PI_BRIDGE_ARGS_ENV];
   if (!rawArgs) {
@@ -92,8 +103,9 @@ export function resolvePiProcessLaunch(
   configEnv: NodeJS.ProcessEnv,
   childEnv: NodeJS.ProcessEnv = configEnv,
   cwd = process.cwd(),
+  options: PiBridgeOptions = DEFAULT_PI_BRIDGE_OPTIONS,
 ): { command: string; args: string[] } {
-  const launch = resolvePiLaunch(configEnv);
+  const launch = resolvePiLaunch(configEnv, options);
   return resolveWindowsPiProcessLaunch(launch, childEnv, cwd);
 }
 
@@ -129,7 +141,12 @@ export class PiRpcChild {
     this.settledExit = new Promise((resolve) => {
       resolveSettledExit = resolve;
     });
-    const launch = resolvePiProcessLaunch(process.env, args.env, args.cwd);
+    const launch = resolvePiProcessLaunch(
+      process.env,
+      args.env,
+      args.cwd,
+      args.bridgeOptions,
+    );
     this.child = experimental_spawnPortableProcess({
       command: launch.command,
       args: [...launch.args, ...args.args],
