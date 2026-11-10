@@ -2169,7 +2169,7 @@ describe("pi subagent delegation translation", () => {
     });
   });
 
-  it("renders parallel tasks with unique agent names", () => {
+  it("renders parallel tasks with collapsed agent counts", () => {
     const { open } = subagentDeltas({
       tasks: [
         { agent: "a", task: "x" },
@@ -2181,7 +2181,7 @@ describe("pi subagent delegation translation", () => {
       item: { type: "delegation" },
       presentation: {
         label: { pending: "Running 3 subagents", completed: "Ran 3 subagents" },
-        title: "a, b",
+        title: "a ×2, b",
       },
     });
     expect(open).not.toMatchObject({
@@ -2326,6 +2326,155 @@ describe("pi subagent delegation translation", () => {
       });
     },
   );
+
+  it("collapses repeated agents in parallel titles with counts", () => {
+    const repeated = subagentDeltas({
+      tasks: [
+        { agent: "web-scout", task: "a" },
+        { agent: "web-scout", task: "b" },
+        { agent: "librarian", task: "c" },
+      ],
+    });
+    expect(repeated.open).toMatchObject({
+      presentation: { title: "web-scout ×2, librarian" },
+    });
+    const single = subagentDeltas({
+      tasks: [{ agent: "web-scout", task: "a" }],
+    });
+    expect(single.open).toMatchObject({
+      presentation: { title: "web-scout" },
+    });
+    const mixed = subagentDeltas({
+      tasks: [
+        { agent: "a", task: "1" },
+        { agent: "b", task: "2" },
+        { agent: "a", task: "3" },
+        { agent: "a", task: "4" },
+      ],
+    });
+    expect(mixed.open).toMatchObject({
+      presentation: { title: "a ×3, b" },
+    });
+  });
+
+  describe("progress updates", () => {
+    function progressMessage(toolName: string, partialResult: unknown) {
+      const translator = createPiDeltaTranslator({
+        resolveModelContextWindow: builtinCatalogResolver,
+      });
+      const deltas = translator.translate(
+        sdkMessage({
+          type: "tool_execution_update",
+          toolCallId: "call-1",
+          toolName,
+          args: {},
+          partialResult,
+        }),
+      );
+      return deltas.find((delta) => delta.kind === "item.progress");
+    }
+
+    it("renders per-child markdown bullets", () => {
+      const delta = progressMessage("subagent", {
+        content: [{ type: "text", text: "raw" }],
+        details: {
+          progress: [
+            {
+              agent: "web-scout",
+              task: "\n  Find docs\nsecond line",
+              status: "running",
+              currentTool: "read",
+              toolCount: 3,
+              durationMs: 13_000,
+              extra: true,
+            },
+            {
+              agent: "librarian",
+              task: "x".repeat(120),
+              status: "completed",
+              toolCount: 1,
+              durationMs: 125_000,
+            },
+            {
+              agent: "a",
+              task: "t",
+              status: "failed",
+              error: "\nboom\ntrace",
+              toolCount: 0,
+            },
+            { agent: "b", status: "pending" },
+            { agent: "c", task: "t", status: "running" },
+          ],
+        },
+      });
+      expect(delta).toMatchObject({
+        message: [
+          "- **web-scout** — Find docs · running `read` · 3 tools · 13s",
+          `- **librarian** — ${"x".repeat(79)}… · done · 1 tool · 2m 5s`,
+          "- **a** — t · failed: boom",
+          "- **b** · pending",
+          "- **c** — t · running",
+        ].join("\n"),
+      });
+    });
+
+    it("neutralizes markdown and whitespace in child fields", () => {
+      const delta = progressMessage("subagent", {
+        details: {
+          progress: [
+            {
+              agent: "we*b\n_scout",
+              task: "Check *exports* [x](y)",
+              status: "running",
+              currentTool: "re\nad",
+            },
+            {
+              agent: "a",
+              task: "# head <b>",
+              status: "running",
+              currentTool: "`a``b`",
+            },
+            { agent: "b", status: "failed", error: "bad `x` | ~y~" },
+          ],
+        },
+      });
+      expect(delta).toMatchObject({
+        message: [
+          "- **we\\*b \\_scout** — Check \\*exports\\* \\[x\\]\\(y\\) · running `re ad`",
+          "- **a** — \\# head \\<b\\> · running ``` `a``b` ```",
+          "- **b** · failed: bad \\`x\\` \\| \\~y\\~",
+        ].join("\n"),
+      });
+    });
+
+    it.each([
+      ["missing details", { content: [{ type: "text", text: "raw" }] }],
+      [
+        "empty progress",
+        { content: [{ type: "text", text: "raw" }], details: { progress: [] } },
+      ],
+      [
+        "malformed progress",
+        {
+          content: [{ type: "text", text: "raw" }],
+          details: { progress: [{ agent: "a", status: "bogus" }] },
+        },
+      ],
+    ])("falls back to raw text for %s", (_name, partialResult) => {
+      expect(progressMessage("subagent", partialResult)).toMatchObject({
+        message: "raw",
+      });
+    });
+
+    it("leaves non-subagent progress unchanged", () => {
+      expect(
+        progressMessage("other", {
+          content: [{ type: "text", text: "raw" }],
+          details: { progress: [{ agent: "a", status: "running" }] },
+        }),
+      ).toMatchObject({ message: "raw" });
+    });
+  });
 
   it.each([
     ["management action", { action: "list" }, "subagent"],
