@@ -1164,6 +1164,7 @@ describe("ThreadRow", () => {
         ),
       ).toEqual([
         toggle.getAttribute("aria-label"),
+        "Pin",
         "Archive",
         "Thread actions",
       ]);

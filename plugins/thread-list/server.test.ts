@@ -104,13 +104,16 @@ describe("thread-list preferences rpc", () => {
     await expect(bb.storage.kv.get("preference:hiddenGroups")).resolves.toBeUndefined();
   });
 
-  it("defaults row actions to archive, migrates bare ids, dedupes them, and rejects malformed or too many keys", async () => {
+  it("defaults row actions to pin and archive, migrates bare ids, dedupes them, and rejects malformed or too many keys", async () => {
     const { bb, harness } = setup();
     await plugin(bb);
     const listed = (await harness.behavior.callRpc("listPreferences", null)) as {
       preferences: { rowActions: string[] };
     };
-    expect(listed.preferences.rowActions).toEqual(["bb--core/archive"]);
+    expect(listed.preferences.rowActions).toEqual([
+      "bb--core/pin",
+      "bb--core/archive",
+    ]);
     await expect(
       harness.behavior.callRpc("setPreference", {
         key: "rowActions",

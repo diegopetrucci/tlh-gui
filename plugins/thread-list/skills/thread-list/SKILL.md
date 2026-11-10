@@ -63,9 +63,9 @@ hover, left to right before its actions menu, as thread action keys: bb's
 `bb--core/rename`, `bb--core/archive`, `bb--core/delete`, the list's
 `thread-list/move` (opens a section menu), or another plugin's
 `<pluginId>/<actionId>`. Bare legacy ids such as `archive` and `core/<id>`
-keys still work. The default is `'["bb--core/archive"]'` and `'[]'` leaves
+keys still work. The default is `'["bb--core/pin","bb--core/archive"]'` and `'[]'` leaves
 only the menu. For example,
-`bb thread-list prefs set rowActions '["bb--core/pin","bb--core/archive"]'`.
+`bb thread-list prefs set rowActions '["bb--core/copyLink","bb--core/pin","bb--core/archive"]'`.
 In the app, a thread
 row's actions menu has Customize actions, which turns that row's quick
 actions into three editable slots in place; each slot picks an action, a filled
