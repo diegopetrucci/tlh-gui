@@ -2,6 +2,10 @@
 
 ## Unreleased (tlh-gui)
 
+### Thread row actions
+
+- Thread rows now show pin next to archive by default. Saved `rowActions` preferences are unchanged. To restore the old default, run `bb thread-list prefs set rowActions '["bb--core/archive"]'`.
+
 ### TLH, TLH main and Pi providers
 
 - Three providers now ship from the Pi plugin: `tlh` ("TLH", always shown, default on fresh installs; saved preferences win), `tlh-main` ("TLH main", shown only where installed, no Install action or release-update checks) and `pi` ("Pi", upstream Pi, shown only where installed).
