@@ -268,6 +268,28 @@ const piSubagentArgsSchema = z
   })
   .passthrough();
 
+const piSubagentProgressEntrySchema = z
+  .object({
+    agent: z.string().trim().min(1),
+    task: z.string().optional(),
+    status: z.enum(["pending", "running", "completed", "failed"]),
+    currentTool: z.string().optional(),
+    toolCount: z.number().optional(),
+    durationMs: z.number().optional(),
+    error: z.string().optional(),
+  })
+  .passthrough();
+
+const piSubagentPartialResultSchema = z
+  .object({
+    details: z
+      .object({
+        progress: z.array(piSubagentProgressEntrySchema).min(1),
+      })
+      .passthrough(),
+  })
+  .passthrough();
+
 interface PiClassifiedTool {
   shape: DeltaItemShape;
   presentation?: DeltaPresentation;
@@ -303,6 +325,105 @@ function firstNonEmptyLine(text: string | undefined): string | undefined {
     .find((line) => line.length > 0);
 }
 
+function formatPiSubagentParallelTitle(agents: string[]): string {
+  const counts = new Map<string, number>();
+  for (const agent of agents) {
+    counts.set(agent, (counts.get(agent) ?? 0) + 1);
+  }
+  return [...counts]
+    .map(([agent, count]) => (count > 1 ? `${agent} ×${count}` : agent))
+    .join(", ");
+}
+
+const PI_SUBAGENT_TASK_MAX_CHARS = 80;
+
+function truncateText(text: string, maxChars: number): string {
+  return text.length > maxChars ? `${text.slice(0, maxChars - 1)}…` : text;
+}
+
+function collapseWhitespace(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+function escapeMarkdownText(text: string): string {
+  return text.replace(/[\\`*_[\]()<>#!|~]/g, "\\$&");
+}
+
+function formatInlineCode(text: string): string {
+  const longestRun = Math.max(
+    0,
+    ...(text.match(/`+/g) ?? []).map((run) => run.length),
+  );
+  const fence = "`".repeat(longestRun + 1);
+  const padded = text.startsWith("`") || text.endsWith("`") ? ` ${text} ` : text;
+  return `${fence}${padded}${fence}`;
+}
+
+function formatPiSubagentElapsed(durationMs: number): string {
+  const totalSeconds = Math.floor(durationMs / 1000);
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return seconds === 0 ? `${minutes}m` : `${minutes}m ${seconds}s`;
+}
+
+function formatPiSubagentProgress(partialResult: unknown): string | undefined {
+  const parsed = piSubagentPartialResultSchema.safeParse(partialResult);
+  if (!parsed.success) {
+    return undefined;
+  }
+  return parsed.data.details.progress
+    .map((child) => {
+      const agent = escapeMarkdownText(collapseWhitespace(child.agent));
+      const currentTool =
+        child.currentTool === undefined
+          ? ""
+          : collapseWhitespace(child.currentTool);
+      const rawTaskLine = firstNonEmptyLine(child.task);
+      const taskLine =
+        rawTaskLine === undefined
+          ? undefined
+          : escapeMarkdownText(
+              truncateText(rawTaskLine, PI_SUBAGENT_TASK_MAX_CHARS),
+            );
+      let status: string;
+      switch (child.status) {
+        case "running":
+          status =
+            currentTool.length === 0
+              ? "running"
+              : `running ${formatInlineCode(currentTool)}`;
+          break;
+        case "completed":
+          status = "done";
+          break;
+        case "failed": {
+          const errorLine = firstNonEmptyLine(child.error);
+          status =
+            errorLine === undefined
+              ? "failed"
+              : `failed: ${escapeMarkdownText(errorLine)}`;
+          break;
+        }
+        case "pending":
+          status = "pending";
+          break;
+      }
+      const parts = [
+        `**${agent}**${taskLine === undefined ? "" : ` — ${taskLine}`}`,
+        status,
+      ];
+      if (child.toolCount !== undefined && child.toolCount > 0) {
+        parts.push(`${child.toolCount} ${child.toolCount === 1 ? "tool" : "tools"}`);
+      }
+      if (child.durationMs !== undefined && child.durationMs > 0) {
+        parts.push(formatPiSubagentElapsed(child.durationMs));
+      }
+      return `- ${parts.join(" · ")}`;
+    })
+    .join("\n");
+}
+
 function classifyPiSubagent(
   toolCallId: string,
   args: unknown,
@@ -331,7 +452,7 @@ function classifyPiSubagent(
   } else if (action !== undefined) {
     return null;
   } else if (tasks !== undefined) {
-    title = [...new Set(tasks.map((entry) => entry.agent))].join(", ");
+    title = formatPiSubagentParallelTitle(tasks.map((entry) => entry.agent));
     const noun = tasks.length === 1 ? "subagent" : "subagents";
     label = isAsync
       ? {
@@ -1588,7 +1709,10 @@ export function createPiDeltaTranslator(
               providerItemId: piEvent.data.toolCallId,
               ...parentRefField,
             },
-            message: extractPiToolProgressText(piEvent.data),
+            message:
+              (piEvent.data.toolName === "subagent"
+                ? formatPiSubagentProgress(piEvent.data.partialResult)
+                : undefined) ?? extractPiToolProgressText(piEvent.data),
             noTurnFallback: noTurnFallbackFor(piEvent.data, context),
           },
         ];
