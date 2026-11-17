@@ -9,6 +9,7 @@ This repo (`diegopetrucci/tlh-gui`) is a standalone copy of `get-bb/bb` (not a G
 - Fork rationale for core patches goes in the patch inventory, not in code comments (upstream AGENTS.md forbids code comments).
 - Product direction: [`VISION.md`](VISION.md)
 - Project memory: gnosis lives in `.gnosis/entries.jsonl`. Always commit gnosis entries together with the changes they relate to.
+- Before opening a pull request, run `git fetch origin` and check whether the branch is behind `origin/main` (this fork's `main`, not `upstream/main`). If it is, rebase onto `origin/main` before pushing and opening the PR.
 
 ---
 
