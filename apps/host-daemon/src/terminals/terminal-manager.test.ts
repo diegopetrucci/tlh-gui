@@ -4,12 +4,7 @@ import path from "node:path";
 import type { AgentRuntime } from "@bb/agent-runtime";
 import type { HostDaemonDaemonWsMessage } from "@bb/host-daemon-contract";
 import type { HostWorkspace } from "@bb/host-workspace";
-import {
-  createDeferredPromise,
-  makeTempDir,
-  makeWorkspaceMergeBase,
-  makeWorkspaceStatus,
-} from "@bb/test-helpers";
+import { createDeferredPromise, makeTempDir } from "@bb/test-helpers";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HostDaemonLogger } from "../logger.js";
 import { RuntimeManager } from "../runtime-manager.js";
@@ -226,7 +221,7 @@ function createFakeRuntime(): AgentRuntime {
     resumeThread: vi.fn(async () => ({
       providerThreadId: "provider-thread",
     })),
-    runTurn: vi.fn(async () => undefined),
+    runTurn: vi.fn(async () => ({ status: "started" as const })),
     steerTurn: vi.fn(async () => steerTurnResult),
     stopThread: vi.fn(async () => ({ providerCheckpointId: null })),
     clearThreadGoal: vi.fn(async () => ({ cleared: true })),
@@ -251,6 +246,7 @@ function createFakeRuntime(): AgentRuntime {
     hasThread: vi.fn(() => false),
     getLiveThreadIds: vi.fn(() => []),
     hasOpenBackgroundWork: vi.fn(() => false),
+    listOpenBackgroundWork: vi.fn(() => []),
     shutdown: vi.fn(async () => undefined),
   };
 }
@@ -260,6 +256,7 @@ function createFakeWorkspace(path: string): HostWorkspace {
     path,
     isGitRepo: true,
     isWorktree: false,
+    gitCommonDir: `${path}/.git`,
     getCurrentBranch: vi.fn(async () => "main"),
     getHeadSha: vi.fn(async () => "commit-1"),
     getLocalStateSnapshot: vi.fn(async () => ({
@@ -267,30 +264,12 @@ function createFakeWorkspace(path: string): HostWorkspace {
       branchName: "main",
     })),
     getSharedGitRefsSnapshot: vi.fn(async () => ({
-      fingerprint: "refs-1",
       defaultBranch: "main",
+      branchNamesFingerprint: "names-1",
+      fingerprintFor: () => "refs-1",
     })),
     getAdditionalWorkspaceWriteRoots: vi.fn(async () => []),
-    getStatus: vi.fn(async () =>
-      makeWorkspaceStatus({
-        mergeBase: makeWorkspaceMergeBase(),
-      }),
-    ),
     getDefaultBranch: vi.fn(async () => "main"),
-    getDiff: vi.fn(async () => ({
-      diff: "",
-      files: "",
-      mergeBaseRef: null,
-      shortstat: "",
-      truncated: false,
-    })),
-    diffFiles: vi.fn(async () => ({
-      files: [],
-      shortstat: "",
-      mergeBaseRef: null,
-      truncated: false,
-    })),
-    diffPatch: vi.fn(async () => []),
     commit: vi.fn(async () => ({
       commitSha: "commit-1",
       commitSubject: "commit",

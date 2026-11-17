@@ -22,11 +22,14 @@ Read the installed SDK declarations for the exact current signatures.
 - `experimental_useBranches`
 - `experimental_useCheckoutState`
 - `experimental_SourceCode`
+- `experimental_FilePreview`
 - `experimental_Diff`
 - `experimental_InfoSection`
+- `experimental_CollapsibleStackCard`
 - `experimental_DetailRow`
 - `experimental_InfoList`
 - `experimental_InfoListRow`
+- `experimental_ThreadContextCardRow`
 - `useRpc`
 - `experimental_useRpcQuery`
 - `experimental_useRpcKeyedQuery`
@@ -36,11 +39,17 @@ Read the installed SDK declarations for the exact current signatures.
 - `useRealtimeConnectionState`
 - `useSettings`
 - `experimental_useExperiment`
+- `experimental_useThreadContextKind`
+- `experimental_useThreadExtensionState`
 - `useBbContext`
 - `experimental_usePluginId`
 - `experimental_useQuestionFormHost`
 - `useBbNavigate`
+- `experimental_useCanOpenFileExternally`
+- `experimental_useTabVisible`
 - `experimental_useAppPanel`
+- `experimental_usePanelTabs`
+- `experimental_PanelTabIcon`
 - `experimental_useFixedTabTarget`
 - `useComposer`
 - `useComposers`
@@ -89,10 +98,15 @@ Read the installed SDK declarations for the exact current signatures.
 - `useSidebarThreadShortcut`
 - `ThreadTitle`
 - `experimental_ThreadStatusGlyph`
+- `experimental_resolveThreadStatus`
+- `experimental_ThreadRowMetadata`
 - `useEnvironmentProviders`
 - `useSdk`
 - `experimental_useProviders`
 - `experimental_useCodeTheme`
+- `experimental_getApplicationLinkApprovals`
+- `experimental_revokeApplicationLinkApproval`
+- `experimental_useServers`
 - `experimental_copyToClipboard`
 - `experimental_saveFile`
 
@@ -116,6 +130,7 @@ Read the installed SDK declarations for the exact current signatures.
 - `PluginNewThreadPanelProps`
 - `PluginPendingInteractionView`
 - `PluginPendingInteractionProps`
+- `ExperimentalQuestionFormAction`
 - `ExperimentalQuestionFormHost`
 - `ExperimentalQuestionShortcut`
 - `BranchPickerProps`
@@ -132,12 +147,15 @@ Read the installed SDK declarations for the exact current signatures.
 - `PluginSidebarFooterActionProps`
 - `ExperimentalSidebarFooterDisclosureProps`
 - `PluginThreadListProps`
-- `PluginThreadHeaderActionProps`
 - `ExperimentalThreadInfoProps`
 - `ExperimentalThreadEnvironment`
 - `ExperimentalThreadContextSegmentInput`
 - `ExperimentalThreadContextSegmentProps`
 - `ExperimentalThreadContextSegmentReference`
+- `ExperimentalCollapsibleStackCardProps`
+- `ExperimentalCollapsibleStackCardDismiss`
+- `ExperimentalThreadRowMetadataProps`
+- `ExperimentalThreadRowMetadataLineProps`
 - `ExperimentalInfoSectionProps`
 - `ExperimentalDetailRowProps`
 - `ExperimentalInfoListProps`
@@ -171,7 +189,6 @@ Read the installed SDK declarations for the exact current signatures.
 - `ExperimentalPageBreadcrumb`
 - `ExperimentalBadge`
 - `ExperimentalBadgeTone`
-- `PluginPanelActionOpenOptions`
 - `PluginNewThreadPanelActionContext`
 - `PluginNewThreadPanelActionRegistration`
 - `PluginPendingInteractionRegistration`
@@ -194,6 +211,8 @@ Read the installed SDK declarations for the exact current signatures.
 - `PluginCodeThemeTokenRule`
 - `PluginCodeThemeData`
 - `PluginCodeThemeState`
+- `ExperimentalServer`
+- `ExperimentalServers`
 - `ExperimentalClipboardContent`
 - `ExperimentalSaveFileRequest`
 - `ExperimentalSaveFileOutcome`
@@ -202,14 +221,22 @@ Read the installed SDK declarations for the exact current signatures.
 - `PluginSidebarThreadShortcut`
 - `PluginThreadTitleProps`
 - `PluginThreadStatusGlyphProps`
+- `PluginThreadStatusInput`
+- `PluginThreadStatusThread`
+- `PluginThreadStatus`
 - `PluginEnvironmentProvider`
 - `PluginEnvironmentProvidersState`
 - `PluginBoundThreadsArea`
 - `PluginBrowserBbSdk`
-- `PluginThreadHeaderActionRegistration`
 - `ExperimentalThreadContextSegmentRegistration`
 - `ExperimentalThreadInfoRowRegistration`
+- `ExperimentalThreadRowMetadataRegistration`
 - `ExperimentalThreadInfoSectionRegistration`
+- `ExperimentalThreadContextCardRowRegistration`
+- `ExperimentalThreadContextCardSectionRegistration`
+- `ExperimentalThreadContextKind`
+- `ExperimentalThreadContextCardProps`
+- `ExperimentalThreadContextCardRowProps`
 - `PluginThreadActionTarget`
 - `PluginThreadActionChoice`
 - `PluginThreadActionChoices`
@@ -217,7 +244,9 @@ Read the installed SDK declarations for the exact current signatures.
 - `PluginThreadAction`
 - `PluginThreadActionDataInput`
 - `PluginThreadActionItemInput`
+- `PluginThreadActionBulkItemInput`
 - `PluginThreadActionRegistration`
+- `PluginThreadActionPlacement`
 - `PluginBoundThreadAction`
 - `PluginThreadActionEntry`
 - `PluginThreadActionRegistrationInfo`
@@ -254,9 +283,12 @@ Read the installed SDK declarations for the exact current signatures.
 - `ExperimentalCodeFenceRendererRegistration`
 - `ExperimentalCodeFenceStatus`
 - `ThreadChatMessageReference`
-- `PluginTargetedPanelActionOpenOptions`
 - `PluginMessageActionContext`
 - `PluginMessageActionRegistration`
+- `ExperimentalMessageMetadataContext`
+- `ExperimentalMessageMetadataPlacement`
+- `ExperimentalMessageMetadataProps`
+- `ExperimentalMessageMetadataRegistration`
 - `PluginAppCommands`
 - `PluginCommandContext`
 - `PluginCommandShortcut`
@@ -312,7 +344,6 @@ Read the installed SDK declarations for the exact current signatures.
 - `ExperimentalComposerInput`
 - `ExperimentalComposerThreadLinks`
 - `ExperimentalComposerClipboard`
-- `ExperimentalComposerView`
 - `ExperimentalComposerContribution`
 - `ExperimentalComposerPlusMenuContribution`
 - `ExperimentalComposerSendMenuContribution`
@@ -370,17 +401,20 @@ Read the installed SDK declarations for the exact current signatures.
 - `ExperimentalFileLocation`
 - `ExperimentalFileOpenOptions`
 - `ExperimentalFileLinkProps`
-- `ExperimentalAppPanelSurface`
 - `ExperimentalFixedTabTargetState`
-- `ExperimentalOpenFixedTabOptions`
 - `ExperimentalTabRegistration`
 - `ExperimentalTabContext`
 - `ExperimentalTabReference`
-- `ExperimentalTabOpenOptions`
+- `ExperimentalOpenTabOptions`
 - `ExperimentalTabTargetReference`
 - `ExperimentalThreadActionTabProps`
+- `ExperimentalThreadTabProps`
 - `ExperimentalThreadTabActionContext`
-- `ExperimentalAppPanel`
+- `ExperimentalPanelController`
+- `ExperimentalPanelTab`
+- `ExperimentalPanelTabDetail`
+- `ExperimentalPanelTabs`
+- `ExperimentalPanelTabIconProps`
 - `BbContext`
 - `BbNavigate`
 - `PluginSdkApp`
@@ -413,6 +447,6 @@ Read-state and error behavior is documented in [Frontend hooks and UI](frontend-
 
 For `app.slots.experimental_tab`, `ExperimentalTabRegistration`,
 `ExperimentalTabReference`, `ExperimentalTabContext`, and
-`experimental_useAppPanel().experimental_openTab`, see
+`experimental_useAppPanel().openTab`, see
 [Thread side-panel tabs in the Plugin Guide](https://getbb.app/plugin-guide#surface-thread-panel).
 Source upgrades are in [Tab API migration](frontend-registration.md#tab-api-migration).

@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -14,10 +14,18 @@ export interface GitCheckoutFixture {
 }
 
 export async function git(cwd: string, ...args: string[]): Promise<string> {
+  return gitWithEnv(cwd, process.env, args);
+}
+
+async function gitWithEnv(
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+  args: string[],
+): Promise<string> {
   const { stdout } = await execFileAsync(
     "git",
     ["-c", "user.name=bb test", "-c", "user.email=test@example.com", ...args],
-    { cwd, encoding: "utf8" },
+    { cwd, encoding: "utf8", env },
   );
   return stdout.trim();
 }
@@ -35,6 +43,7 @@ export async function commitVersion(
   repo: string,
   version: string,
   subject: string,
+  committedAt?: string,
 ): Promise<string> {
   writeRepoFile(
     repo,
@@ -42,21 +51,35 @@ export async function commitVersion(
     `${JSON.stringify({ name: "bb-app", version })}\n`,
   );
   await git(repo, "add", "-A");
-  await git(repo, "commit", "-q", "-m", subject);
+  await gitWithEnv(
+    repo,
+    committedAt === undefined
+      ? process.env
+      : { ...process.env, GIT_COMMITTER_DATE: committedAt },
+    ["commit", "-q", "-m", subject],
+  );
   return git(repo, "rev-parse", "HEAD");
 }
 
-export async function createGitCheckout(): Promise<GitCheckoutFixture> {
+export async function createGitCheckout(
+  template?: GitCheckoutFixture,
+): Promise<GitCheckoutFixture> {
   const root = mkdtempSync(join(tmpdir(), "bb-app-update-git-"));
   const origin = join(root, "origin.git");
   const upstream = join(root, "upstream");
   const checkout = join(root, "checkout");
-  await git(root, "init", "-q", "--bare", "-b", "main", origin);
-  await git(root, "init", "-q", "-b", "main", upstream);
-  await git(upstream, "remote", "add", "origin", origin);
-  await commitVersion(upstream, "1.0.0", "Initial commit");
-  await git(upstream, "push", "-q", "origin", "main");
-  await git(root, "clone", "-q", origin, checkout);
+  if (template === undefined) {
+    await git(root, "init", "-q", "--bare", "-b", "main", origin);
+    await git(root, "init", "-q", "-b", "main", upstream);
+    await git(upstream, "remote", "add", "origin", origin);
+    await commitVersion(upstream, "1.0.0", "Initial commit");
+    await git(upstream, "push", "-q", "origin", "main");
+    await git(root, "clone", "-q", origin, checkout);
+  } else {
+    cpSync(template.root, root, { recursive: true });
+    await git(upstream, "remote", "set-url", "origin", origin);
+    await git(checkout, "remote", "set-url", "origin", origin);
+  }
   return {
     checkout,
     cleanup: () =>
@@ -75,8 +98,9 @@ export async function publish(
   upstream: string,
   version: string,
   subject: string,
+  committedAt?: string,
 ): Promise<string> {
-  const commit = await commitVersion(upstream, version, subject);
+  const commit = await commitVersion(upstream, version, subject, committedAt);
   await git(upstream, "push", "-q", "origin", "main");
   return commit;
 }

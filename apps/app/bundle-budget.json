@@ -75,7 +75,7 @@
     "NewThreadPage decide how slow bb feels on a phone after boot. Their",
     "forbiddenPackages are the diff engine, math, file tree and terminal code",
     "that only a user action needs.",
-    "The composer (tiptap/prosemirror) is visible on both pages and is allowed.",
+    "The composer is the bundled Composer plugin, so core ships no tiptap.",
     "Run `node scripts/why-eager.mjs --from=views/SplitWorkspaceRoute.tsx <package>`",
     "to print the static chain that pulled a package into the route.",
     "",
@@ -123,7 +123,28 @@
     "leaving about 15% raw headroom, and both journey limits are set 25% above",
     "their measured sizes (20% headroom) so ordinary feature work does not hit",
     "them every week. The forbidden-package and split-boundary guards catch",
-    "structural regressions."
+    "structural regressions.",
+    "",
+    "On 2026-10-21 the plugin runtime stopped importing @pierre/diffs eagerly.",
+    "Bundles that import it get it before they evaluate; experimental_Diff",
+    "loads behind a split. The PluginFrontend closure, which every plugin",
+    "waits on, measures 528.9 KB raw / 165.3 KB brotli. Its limits sit 25%",
+    "above that, and the diff engine and Shiki are forbidden.",
+    "",
+    "On 2026-11-03 app chunks were grouped by page journey (vite-journey-chunks.ts):",
+    "the workspace route, the plugin runtime, the code ThreadPage and NewThreadPage",
+    "share, and each page's own code. A cold load had fetched 149 app chunks,",
+    "85 of them under 2 KB brotli. Over HTTP/1.1 at 100 ms latency they queued",
+    "on six connections ahead of first content. The plugin runtime chunk now",
+    "statically imports the workspace-route chunk that every page modulepreloads,",
+    "so PluginFrontend measures the same page journey as the other two closures:",
+    "the workspace route plus the plugin runtime. Measured that way, main was",
+    "56 chunks / 760.8 KB raw / 234.2 KB brotli and is now 2 chunks / 771.2 KB raw /",
+    "203.2 KB brotli. Journey membership follows only the re-exports a module",
+    "actually imports, so package barrels do not pull unused code forward. The",
+    "PluginFrontend limits sit 25% above the new measurement. ThreadPage went",
+    "from 95 chunks / 522.0 KB brotli to 4 / 460.2 KB, and NewThreadPage from 74 /",
+    "291.1 KB to 4 / 252.0 KB. Their limits are unchanged."
   ],
   "maxBootBytes": 1722436,
   "maxBootBrotliBytes": 424031,
@@ -273,6 +294,21 @@
     "rehype-sanitize": "src/components/ui/markdown-html.tsx"
   },
   "routeClosures": {
+    "PluginFrontend": {
+      "maxBytes": 987175,
+      "maxBrotliBytes": 260094,
+      "forbiddenPackages": [
+        "@pierre/diffs",
+        "@pierre/theming",
+        "@shikijs/core",
+        "@shikijs/engine-javascript",
+        "@shikijs/engine-oniguruma",
+        "@shikijs/langs",
+        "@shikijs/vscode-textmate",
+        "oniguruma-to-es",
+        "shiki"
+      ]
+    },
     "ThreadPage": {
       "maxBytes": 2428911,
       "maxBrotliBytes": 699019,

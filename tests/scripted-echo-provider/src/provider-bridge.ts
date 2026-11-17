@@ -54,6 +54,8 @@ export const scriptedEchoOptionsSchema = z
   .object({
     startDelayMs: z.number().int().nonnegative().optional(),
     turnStartResponseDelayMs: z.number().int().nonnegative().optional(),
+    turnStartErrorAfterMs: z.number().int().nonnegative().optional(),
+    steerResponseDelayMs: z.number().int().nonnegative().optional(),
     answerStartWithoutIdentity: z.boolean().optional(),
     identityAfterResponse: z.boolean().optional(),
     identityNotificationsBeforeTurn: z
@@ -415,6 +417,7 @@ function userQuestionPayload(requestId: JsonRpcId): PendingInteractionPayload {
           },
         ],
         allowFreeText: true,
+        required: true,
       },
     ],
   };
@@ -691,7 +694,6 @@ function beginTurn(args: {
           plan.approvalKind,
           `approval-${providerTurnId}`,
         ),
-        providerNativeIds: true,
       },
     );
     pendingReplies.set(requestId, {
@@ -714,7 +716,6 @@ function beginTurn(args: {
         threadId: session.threadId,
         turnId: providerTurnId,
         payload: userQuestionPayload(requestId),
-        providerNativeIds: true,
       },
     });
     pendingReplies.set(requestId, {
@@ -732,7 +733,6 @@ function beginTurn(args: {
       callId: `call-${session.turnCount}`,
       tool: plan.toolName,
       arguments: {},
-      providerNativeIds: true,
     });
     pendingReplies.set(requestId, {
       kind: "tool",
@@ -953,6 +953,7 @@ const MODEL_LIST = {
       model: "fake-model",
       displayName: "Fake Model",
       description: "Fake model for integration and runtime tests",
+      reasoningDiscovery: "known",
       supportedReasoningEfforts: [
         { reasoningEffort: "medium", description: "Medium" },
       ],
@@ -1155,6 +1156,14 @@ const handlers: Record<string, RequestHandler> = {
     logProcessStep(
       `turn/start:${process.pid}:${parsed.data.threadId}:${promptText(parsed.data.input)}`,
     );
+    const errorAfterMs = session.options.turnStartErrorAfterMs;
+    if (errorAfterMs !== undefined) {
+      setTimeout(
+        () => io.sendError(id, -32000, "The provider lost the turn start"),
+        errorAfterMs,
+      );
+      return;
+    }
     const responseDelayMs = session.options.turnStartResponseDelayMs;
     if (responseDelayMs === undefined) {
       io.sendResult(id, {});
@@ -1197,14 +1206,22 @@ const handlers: Record<string, RequestHandler> = {
       });
       return;
     }
-    emitDeltas(session.threadId, [
-      {
-        kind: "input.accepted",
-        clientRequestId: parsed.data.clientRequestId,
-        providerTurnId: session.activeTurn.providerTurnId,
-      },
-    ]);
-    io.sendResult(id, {});
+    const providerTurnId = session.activeTurn.providerTurnId;
+    const acceptSteer = (): void => {
+      emitDeltas(session.threadId, [
+        {
+          kind: "input.accepted",
+          clientRequestId: parsed.data.clientRequestId,
+          providerTurnId,
+        },
+      ]);
+      io.sendResult(id, {});
+    };
+    if (options.steerResponseDelayMs === undefined) {
+      acceptSteer();
+      return;
+    }
+    setTimeout(acceptSteer, options.steerResponseDelayMs);
   },
 
   [BRIDGE_REQUEST_METHODS.threadStop]: (id, params) => {

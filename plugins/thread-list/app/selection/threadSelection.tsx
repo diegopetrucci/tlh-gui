@@ -3,11 +3,13 @@ import {
   useContext,
   useEffect,
   useLayoutEffect,
+  useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
   type ReactNode,
 } from "react";
-import { experimental_useExperiment } from "@get-bb/plugin-sdk/app";
+import { useSidebarData } from "../model/use-sidebar-data.js";
 import { SIDEBAR_CONTENT_SELECTOR } from "../ui/sidebar.js";
 import { SIDEBAR_WINDOWED_NAV_ATTRIBUTE } from "../list/sidebarThreadShortcuts.js";
 
@@ -16,9 +18,7 @@ const NO_THREAD_IDS: readonly string[] = [];
 const THREAD_ROW_TARGET_SELECTOR = "a[data-sidebar-thread-id]";
 
 const SELECTION_KEEPING_SELECTOR =
-  '[data-sidebar="sidebar"], [data-radix-popper-content-wrapper], [role="menu"]';
-
-export const SIDEBAR_MULTI_SELECT_EXPERIMENT = "sidebarMultiSelect";
+  '[data-sidebar-rename-row], [data-radix-popper-content-wrapper], [role="menu"]';
 
 export interface ThreadSelectionModifiers {
   metaKey: boolean;
@@ -31,7 +31,6 @@ export class ThreadSelectionStore {
   private selectedSet: ReadonlySet<string> = new Set();
   private anchor: string | null = null;
   private activeThreadId: string | null = null;
-  private enabled = true;
   private readonly listeners = new Set<() => void>();
 
   subscribe = (listener: () => void): (() => void) => {
@@ -51,14 +50,14 @@ export class ThreadSelectionStore {
     this.activeThreadId = threadId;
   }
 
-  setEnabled(enabled: boolean): void {
-    this.enabled = enabled;
-    if (!enabled) this.clear();
-  }
-
   clear(): void {
     this.anchor = null;
     this.replace(NO_THREAD_IDS);
+  }
+
+  remove(threadIds: ReadonlySet<string>): void {
+    if (this.anchor !== null && threadIds.has(this.anchor)) this.anchor = null;
+    this.replace(this.selected.filter((threadId) => !threadIds.has(threadId)));
   }
 
   restoreActiveThreadFocus(): void {
@@ -83,7 +82,6 @@ export class ThreadSelectionStore {
     modifiers: ThreadSelectionModifiers,
     origin: Element,
   ): boolean {
-    if (!this.enabled) return false;
     if (!modifiers.shiftKey) {
       this.anchor = threadId;
       if (this.selected.length > 0) this.replace(NO_THREAD_IDS);
@@ -192,13 +190,28 @@ export function ThreadSelectionProvider({
   children: ReactNode;
 }) {
   const [store] = useState(() => new ThreadSelectionStore());
-  const enabled = experimental_useExperiment(SIDEBAR_MULTI_SELECT_EXPERIMENT);
   useLayoutEffect(() => {
     store.setActiveThreadId(activeThreadId);
   }, [activeThreadId, store]);
+  const { projects } = useSidebarData();
+  const listedThreadIds = useMemo(
+    () =>
+      new Set(
+        projects.flatMap((project) =>
+          project.threads.map((thread) => thread.id),
+        ),
+      ),
+    [projects],
+  );
+  const previousListedThreadIds = useRef(listedThreadIds);
   useLayoutEffect(() => {
-    store.setEnabled(enabled);
-  }, [enabled, store]);
+    const previous = previousListedThreadIds.current;
+    previousListedThreadIds.current = listedThreadIds;
+    const removed = new Set(
+      [...previous].filter((threadId) => !listedThreadIds.has(threadId)),
+    );
+    if (removed.size > 0) store.remove(removed);
+  }, [listedThreadIds, store]);
   const hasSelection = useSyncExternalStore(
     store.subscribe,
     () => store.getSelected().length > 0,

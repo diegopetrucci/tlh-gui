@@ -28,6 +28,7 @@ export const measuredTargetSchema = z.discriminatedUnion("outcome", [
         z.object({
           name: z.string(),
           sizeBytes: z.number().int().nonnegative(),
+          empty: z.boolean(),
         }),
       )
       .nullable(),
@@ -71,12 +72,19 @@ export const developerEntryInspectionSchema = z.object({
 });
 
 const absolutePathSchema = z.string().min(1);
+const gitWorktreeSkipReasonSchema = z.enum([
+  "notWorktree",
+  "locked",
+  "uncommittedChanges",
+  "unsavedCommits",
+]);
 
 export const hostStorageContract = defineRpcContract({
   listGitWorktrees: {
     input: z
       .object({
         repositoryPaths: z.array(absolutePathSchema).min(1).max(100),
+        ownedPaths: z.array(absolutePathSchema),
       })
       .strict(),
     output: z.object({
@@ -102,6 +110,12 @@ export const hostStorageContract = defineRpcContract({
       ),
     }),
   },
+  inspectGitWorktree: {
+    input: z
+      .object({ repositoryPath: absolutePathSchema, path: absolutePathSchema })
+      .strict(),
+    output: z.object({ reasons: z.array(gitWorktreeSkipReasonSchema) }),
+  },
   removeGitWorktrees: {
     input: z
       .object({
@@ -117,16 +131,7 @@ export const hostStorageContract = defineRpcContract({
           z.object({
             path: z.string(),
             outcome: z.literal("skipped"),
-            reasons: z
-              .array(
-                z.enum([
-                  "notWorktree",
-                  "locked",
-                  "uncommittedChanges",
-                  "unsavedCommits",
-                ]),
-              )
-              .min(1),
+            reasons: z.array(gitWorktreeSkipReasonSchema).min(1),
           }),
           z.object({
             path: z.string(),

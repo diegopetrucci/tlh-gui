@@ -74,6 +74,10 @@
     "category": "utilities",
     "screenshots": []
   },
+  "github-star": {
+    "category": "utilities",
+    "screenshots": []
+  },
   "plugin-api-docs": {
     "category": "plugin-development",
     "screenshots": [
@@ -127,6 +131,10 @@
     "screenshots": []
   },
   "github": {
+    "category": "code-and-reviews",
+    "screenshots": []
+  },
+  "git": {
     "category": "code-and-reviews",
     "screenshots": []
   },

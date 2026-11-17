@@ -20,6 +20,34 @@ function nextRequestId(): number {
   return requestId;
 }
 
+const HOST_TOOLCHAIN_KEY = Symbol.for("@bb/process-utils/host-toolchain");
+
+interface ResolvingToolchain {
+  resolve(command: string, options?: unknown): string | null;
+}
+
+function isResolvingToolchain(value: unknown): value is ResolvingToolchain {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "resolve" in value &&
+    typeof value.resolve === "function"
+  );
+}
+
+function hideTlhClis(): void {
+  const toolchain: unknown = Reflect.get(globalThis, HOST_TOOLCHAIN_KEY);
+  if (!isResolvingToolchain(toolchain)) {
+    throw new Error("host toolchain is not available to the test");
+  }
+  const resolve = toolchain.resolve.bind(toolchain);
+  vi.spyOn(toolchain, "resolve").mockImplementation((command, options) =>
+    command === "tlh" || command === "tlh-main"
+      ? null
+      : resolve(command, options),
+  );
+}
+
 beforeEach(async () => {
   harness = await startFakePiBridge({
     prefix: "bb-pi-install-gate-",
@@ -28,6 +56,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await harness.teardown();
 });
 
@@ -199,6 +228,7 @@ const tlhMainBridgeOptions = {
 
 it("ignores BB_PI_BRIDGE_COMMAND for the tlh-main flavor and reports its own CLI as missing", async () => {
   vi.stubEnv("PATH", harness.workspaceDir);
+  hideTlhClis();
   const health = await harness.request(nextRequestId(), "provider/health", {
     providerId: "tlh-main",
     cwd: harness.workspaceDir,
@@ -260,6 +290,7 @@ it.each([
   "resolves the %s flavor from providerId when no providerOptions are sent",
   async (providerId, displayName) => {
     vi.stubEnv("PATH", harness.workspaceDir);
+    hideTlhClis();
     const health = await harness.request(nextRequestId(), "provider/health", {
       providerId,
       cwd: harness.workspaceDir,
@@ -296,6 +327,7 @@ it.each([
 
 it("lets providerId win when providerOptions lack piFlavor", async () => {
   vi.stubEnv("PATH", harness.workspaceDir);
+  hideTlhClis();
   const health = await harness.request(nextRequestId(), "provider/health", {
     providerId: "tlh-main",
     cwd: harness.workspaceDir,

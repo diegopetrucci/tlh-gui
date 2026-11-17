@@ -28,7 +28,7 @@ import {
   getAuthenticatedDaemon,
 } from "./auth.js";
 import { requireAuthenticatedDaemonSession } from "./session-state.js";
-import { readAttachment } from "../services/projects/attachments.js";
+import { createAttachmentContentResponse } from "../services/projects/attachments.js";
 import { handleHostSessionOpened } from "./session-owner-side-effects.js";
 import { resolveReportedConnectMachineId } from "./hosts.js";
 import type { PluginService } from "../services/plugins/plugin-service.js";
@@ -196,8 +196,9 @@ export function registerInternalSessionRoutes(
       hasMachineCredential: payload.hasMachineCredential,
     });
 
-    await handleHostSessionOpened(deps, {
+    const { endedInteractiveRequests } = await handleHostSessionOpened(deps, {
       activeThreads: payload.activeThreads,
+      openThreadWork: payload.openThreadWork,
       hostId: daemon.hostId,
       undeliveredEventThreadIds: payload.undeliveredEventThreadIds,
       openedSession: session,
@@ -233,6 +234,7 @@ export function registerInternalSessionRoutes(
           : {}),
         pluginHostGenerations: plugins.listHostArtifactGenerations(),
         retiredEnvironmentIds,
+        endedInteractiveRequests,
         machineEnvironment: await machineEnvironment.snapshot(daemon.hostId),
         idleProviderSessionTimeoutMinutes: getAppSettings(deps.db)
           .idleProviderSessionTimeoutMinutes,
@@ -270,16 +272,11 @@ export function registerInternalSessionRoutes(
         );
       }
 
-      const attachment = await readAttachment(
-        deps.config.dataDir,
-        query.projectId,
-        query.path,
-      );
-      return new Response(new Uint8Array(attachment.content), {
-        status: 200,
-        headers: {
-          "content-type": attachment.mimeType ?? "application/octet-stream",
-        },
+      return createAttachmentContentResponse({
+        dataDir: deps.config.dataDir,
+        projectId: query.projectId,
+        path: query.path,
+        request: context.req.raw,
       });
     },
   );

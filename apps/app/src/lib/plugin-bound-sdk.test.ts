@@ -185,13 +185,23 @@ describe("bindSdkToPlugin", () => {
     });
   });
 
-  it("preserves SDK arguments while applying cache updates", async () => {
-    const { sdk, queryClient, threads, threadSections } = makeSdk();
+  it("adds a created section to the sidebar before resolving", async () => {
+    const { sdk, queryClient, threadSections } = makeSdk();
+    const sidebarKey = sidebarNavigationQueryKey();
+    queryClient.setQueryData(
+      sidebarKey,
+      makeSidebarBootstrapResponse({ sections: [] }),
+    );
     const bound = bindSdkToPlugin(sdk, "thread-list", queryClient);
-    await bound.threads.pin({ threadId: "thr_1" });
+
     await bound.threadSections.create({ name: "Later" });
-    expect(threads.pin).toHaveBeenCalledWith({ threadId: "thr_1" });
+
     expect(threadSections.create).toHaveBeenCalledWith({ name: "Later" });
+    expect(
+      queryClient
+        .getQueryData<SidebarBootstrapResponse>(sidebarKey)
+        ?.sections.map((section) => section.id),
+    ).toEqual(["sec_created"]);
   });
 
   it("batches synchronous plugin thread metadata updates into one optimistic transaction", async () => {
@@ -435,7 +445,12 @@ describe("bindSdkToPlugin", () => {
         createDeferredPromise<ReturnType<typeof makeThreadResponse>>();
       threads.unpin.mockReturnValueOnce(pending.promise);
       threads.update.mockResolvedValueOnce(
-        makeThreadResponse({ id: entry.id, pinnedAt: null, sectionId: "new" }),
+        makeThreadResponse({
+          id: entry.id,
+          pinnedAt: null,
+          sectionId: "new",
+          updatedAt: entry.updatedAt + 2,
+        }),
       );
       const bound = bindSdkToPlugin(sdk, "thread-list", queryClient);
       const moved = Promise.all([
@@ -460,6 +475,7 @@ describe("bindSdkToPlugin", () => {
             id: entry.id,
             pinnedAt: null,
             sectionId: "old",
+            updatedAt: entry.updatedAt + 1,
           }),
         );
         await moved;

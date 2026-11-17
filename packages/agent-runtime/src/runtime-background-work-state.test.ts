@@ -221,6 +221,90 @@ describe("RuntimeBackgroundWorkState", () => {
     expect(state.hasOpenWork()).toBe(false);
   });
 
+  it("settles a thread's open tasks as stopped from their latest state and forgets the thread", () => {
+    const state = new RuntimeBackgroundWorkState();
+    state.observe(taskStarted("task-1"));
+    state.observe({
+      type: "item/backgroundTask/progress",
+      threadId: "t1",
+      providerThreadId: "p1",
+      scope: threadScope(),
+      item: { ...task("task-1"), summary: "still watching CI" },
+    });
+    state.observe(taskStarted("task-2"));
+    state.observe(taskCompleted("task-2"));
+    state.observe({
+      type: "item/started",
+      threadId: "t1",
+      providerThreadId: "p1",
+      scope: turnScope("turn-1"),
+      item: delegation("d1", "pending", true),
+    });
+    state.observe(taskStarted("task-3", { threadId: "t2" }));
+
+    expect(state.settleThread("t1")).toEqual([
+      {
+        type: "item/backgroundTask/completed",
+        threadId: "t1",
+        providerThreadId: "p1",
+        scope: threadScope(),
+        item: {
+          ...task("task-1"),
+          summary: "still watching CI",
+          ownerStopped: true,
+          status: "interrupted",
+          taskStatus: "stopped",
+        },
+      },
+    ]);
+    expect(state.hasOpenThreadWork("t1")).toBe(false);
+    expect(state.settleThread("t1")).toEqual([]);
+    expect(state.hasOpenThreadWork("t2")).toBe(true);
+  });
+
+  it("does not settle an open TLH detached run as stopped, but still forgets it", () => {
+    const state = new RuntimeBackgroundWorkState();
+    state.observe({
+      ...taskStarted("run-1", { taskType: "local_subagent" }),
+      item: {
+        ...task("run-1", { taskType: "local_subagent" }),
+        familyId: "pi:detached:run-1",
+      },
+    } as ThreadEvent);
+    state.observe(taskStarted("task-2"));
+
+    expect(
+      state
+        .settleAll()
+        .map((event) =>
+          event.type === "item/backgroundTask/completed"
+            ? [event.item.id, event.item.taskStatus]
+            : [event.type],
+        ),
+    ).toEqual([["task-2", "stopped"]]);
+    expect(state.hasOpenWork()).toBe(false);
+  });
+
+  it("settles the open tasks of every thread", () => {
+    const state = new RuntimeBackgroundWorkState();
+    state.observe(taskStarted("task-1", { threadId: "t1" }));
+    state.observe(taskStarted("task-2", { threadId: "t2" }));
+
+    expect(
+      state
+        .settleAll()
+        .map((event) =>
+          event.type === "item/backgroundTask/completed"
+            ? [event.threadId, event.item.id, event.item.status]
+            : [event.type],
+        ),
+    ).toEqual([
+      ["t1", "task-1", "interrupted"],
+      ["t2", "task-2", "interrupted"],
+    ]);
+    expect(state.hasOpenWork()).toBe(false);
+  });
+
   it("ignores non-background item lifecycle events", () => {
     const state = new RuntimeBackgroundWorkState();
 
@@ -230,9 +314,12 @@ describe("RuntimeBackgroundWorkState", () => {
       providerThreadId: "p1",
       scope: turnScope("turn-1"),
       item: {
-        type: "agentMessage",
-        id: "msg-1",
-        text: "hello",
+        type: "commandExecution",
+        id: "cmd-1",
+        command: "sleep 10",
+        cwd: "/tmp",
+        status: "pending",
+        approvalStatus: null,
       },
     });
 

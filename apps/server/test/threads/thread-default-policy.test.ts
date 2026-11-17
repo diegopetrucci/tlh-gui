@@ -4,9 +4,9 @@ import {
 } from "../helpers/environment-provider.js";
 import {
   PERSONAL_PROJECT_ID,
-  type GitSourceInspection,
   type ProjectExecutionDefaults,
   type Thread,
+  type GitSourceInspection,
 } from "@bb/domain";
 import { createEnvironment } from "@bb/db";
 import { describe, expect, it } from "vitest";
@@ -14,8 +14,6 @@ import {
   resolveCreateThreadEnvironment,
   resolveCreateThreadExecutionDefaults,
   resolveProjectDefaultThreadEnvironment,
-  resolveThreadDefaultPermissionMode,
-  resolveThreadExecutionPermissionMode,
 } from "../../src/services/threads/thread-default-policy.js";
 import { createProviderRegistryService } from "../../src/services/providers/provider-registry.js";
 import {
@@ -32,10 +30,6 @@ import { withTestHarness } from "../helpers/test-app.js";
 
 const registry = await createTestProviderRegistry();
 
-type PolicyTestThread = Pick<
-  Thread,
-  "originKind" | "parentThreadId" | "projectId" | "providerId"
->;
 type PolicyTestParentThread = Pick<
   Thread,
   | "archivedAt"
@@ -45,18 +39,6 @@ type PolicyTestParentThread = Pick<
   | "parentThreadId"
   | "projectId"
 >;
-
-function makeThread(
-  overrides: Partial<PolicyTestThread> = {},
-): PolicyTestThread {
-  return {
-    originKind: null,
-    parentThreadId: null,
-    projectId: "proj-1",
-    providerId: "codex",
-    ...overrides,
-  };
-}
 
 function makeDefaults(
   overrides: Partial<ProjectExecutionDefaults> = {},
@@ -95,7 +77,6 @@ describe("resolveCreateThreadExecutionDefaults", () => {
       }),
     ).toEqual({
       providerId: "codex",
-      executionDefaults: null,
       providerFallbackCandidates: [
         "claude-code",
         "tlh",
@@ -188,14 +169,6 @@ describe("resolveCreateThreadExecutionDefaults", () => {
     ).toEqual([]);
   });
 
-  it("has no fallback candidates when a stored default provider is used", () => {
-    expect(
-      resolveCreateThreadExecutionDefaults(registry, {
-        storedDefaults: makeDefaults({ providerId: "codex" }),
-      }).providerFallbackCandidates,
-    ).toEqual([]);
-  });
-
   it("discards stored defaults when the resolved provider changes", () => {
     expect(
       resolveCreateThreadExecutionDefaults(registry, {
@@ -207,7 +180,6 @@ describe("resolveCreateThreadExecutionDefaults", () => {
       }),
     ).toEqual({
       providerId: "pi",
-      executionDefaults: null,
       providerFallbackCandidates: [],
     });
   });
@@ -224,9 +196,18 @@ describe("resolveCreateThreadExecutionDefaults", () => {
       }),
     ).toEqual({
       providerId: "codex",
-      executionDefaults: storedDefaults,
       providerFallbackCandidates: [],
     });
+  });
+
+  it("falls back to the product default when the stored provider is no longer registered", () => {
+    expect(
+      resolveCreateThreadExecutionDefaults(registry, {
+        storedDefaults: makeDefaults({ providerId: "acp-removed-plugin" }),
+      }),
+    ).toEqual(
+      resolveCreateThreadExecutionDefaults(registry, { storedDefaults: null }),
+    );
   });
 
   it("skips unavailable providers when choosing the product default", async () => {
@@ -241,7 +222,6 @@ describe("resolveCreateThreadExecutionDefaults", () => {
       }),
     ).toEqual({
       providerId: "claude-code",
-      executionDefaults: null,
       providerFallbackCandidates: [
         "tlh",
         "tlh-main",
@@ -333,6 +313,47 @@ describe("resolveCreateThreadEnvironment", () => {
       environmentId: "env-1",
     });
   });
+
+  it.each(["project-default", "host"] as const)(
+    "reuses a non-git parent's stored workspace for implicit %s children",
+    async (type) => {
+      await withTestHarness(async (harness) => {
+        installFakeGitWorktreeProvider();
+        const { host } = seedHostSession(harness.deps, {
+          id: "host-plain-parent",
+        });
+        const { project } = seedProjectWithSource(harness.deps, {
+          hostId: host.id,
+          path: "/tmp/Документы",
+        });
+        const environment = createEnvironment(harness.db, harness.hub, {
+          projectId: project.id,
+          hostId: host.id,
+          path: "/tmp/Документы",
+          isGitRepo: false,
+          providerOwnsPath: false,
+          status: "ready",
+        });
+        await expect(
+          resolveCreateThreadEnvironment(harness.deps, {
+            parentThread: makeParentThread({
+              projectId: project.id,
+              environmentId: environment.id,
+            }),
+            projectId: project.id,
+            requestedEnvironment:
+              type === "project-default"
+                ? { type }
+                : {
+                    type,
+                    hostId: host.id,
+                    workspace: { type: "unmanaged", path: null },
+                  },
+          }),
+        ).resolves.toEqual({ type: "reuse", environmentId: environment.id });
+      });
+    },
+  );
 
   it("uses a fresh worktree on the parent's machine for a project child", async () => {
     await withTestHarness(async (harness) => {
@@ -606,25 +627,22 @@ describe("resolveProjectDefaultThreadEnvironment", () => {
         hostId: host.id,
         path: "/tmp/git-default-source",
       });
-      registerHostRpcResponder(harness, {
+      const responder = registerHostRpcResponder(harness, {
         hostId: host.id,
         sessionId: session.id,
-        handle: () => ({
-          ok: true,
-          result: {
-            checkout: {
-              kind: "branch" as const,
-              branchName: "feature",
-              headSha: "abc123",
+        handle: (request) => {
+          expect(request.command.type).toBe("host.inspect_git_checkout");
+          return {
+            ok: true,
+            result: {
+              checkout: {
+                kind: "branch" as const,
+                branchName: "feature",
+                headSha: "abc123",
+              },
             },
-            defaultBranch: "main",
-            defaultBranchRelation: null,
-            isWorktree: false,
-            hasUncommittedChanges: false,
-            operation: { kind: "none" as const },
-            originDefaultBranch: null,
-          } satisfies GitSourceInspection,
-        }),
+          };
+        },
       });
 
       await expect(
@@ -635,48 +653,9 @@ describe("resolveProjectDefaultThreadEnvironment", () => {
         type: "provider",
         environmentProviderId: "git-worktree",
         machine: { type: "existing", hostId: host.id },
-        inputs: { branch: { kind: "named", name: "main" } },
+        inputs: { branch: { kind: "default" } },
       });
-    });
-  });
-
-  it("uses the project checkout for a non-Git project", async () => {
-    await withTestHarness(async (harness) => {
-      const { host, session } = seedHostSession(harness.deps, {
-        id: "host-non-git-default",
-      });
-      seedPrimaryHost(harness.deps, host.id);
-      const { project } = seedProjectWithSource(harness.deps, {
-        hostId: host.id,
-        path: "/tmp/non-git-default-source",
-      });
-      registerHostRpcResponder(harness, {
-        hostId: host.id,
-        sessionId: session.id,
-        handle: () => ({
-          ok: true,
-          result: {
-            checkout: { kind: "unborn" as const, branchName: "main" },
-            defaultBranch: null,
-            defaultBranchRelation: null,
-            isWorktree: false,
-            hasUncommittedChanges: false,
-            operation: { kind: "none" as const },
-            originDefaultBranch: null,
-          } satisfies GitSourceInspection,
-        }),
-      });
-
-      await expect(
-        resolveProjectDefaultThreadEnvironment(harness.deps, {
-          projectId: project.id,
-        }),
-      ).resolves.toEqual({
-        type: "provider",
-        environmentProviderId: "project-checkout",
-        machine: { type: "existing", hostId: host.id },
-        inputs: { path: "/tmp/non-git-default-source" },
-      });
+      expect(responder.requests).toHaveLength(1);
     });
   });
 
@@ -699,181 +678,5 @@ describe("resolveProjectDefaultThreadEnvironment", () => {
         inputs: null,
       });
     });
-  });
-});
-
-describe("resolveThreadDefaultPermissionMode", () => {
-  it("uses the auto permission default for non-agent providers", () => {
-    expect(
-      resolveThreadDefaultPermissionMode(registry, {
-        thread: makeThread({
-          parentThreadId: "thr-parent-1",
-          providerId: "custom-provider",
-        }),
-      }),
-    ).toBe("auto");
-  });
-
-  it("uses full for Pi threads", () => {
-    expect(
-      resolveThreadDefaultPermissionMode(registry, {
-        thread: makeThread({
-          parentThreadId: "thr-parent-1",
-          providerId: "pi",
-        }),
-      }),
-    ).toBe("full");
-  });
-
-  it("uses full for ACP threads when the Auto default is unsupported", () => {
-    expect(
-      resolveThreadDefaultPermissionMode(registry, {
-        thread: makeThread({
-          parentThreadId: "thr-parent-1",
-          providerId: "acp-cursor",
-        }),
-      }),
-    ).toBe("full");
-  });
-
-  it("uses auto for Codex threads", () => {
-    expect(
-      resolveThreadDefaultPermissionMode(registry, {
-        thread: makeThread({
-          parentThreadId: "thr-other-project-parent-1",
-          providerId: "codex",
-        }),
-      }),
-    ).toBe("auto");
-  });
-});
-
-describe("resolveThreadExecutionPermissionMode", () => {
-  it("prefers requested permission modes over every fallback", () => {
-    expect(
-      resolveThreadExecutionPermissionMode(registry, {
-        requestedPermissionMode: "auto",
-        lastExecutionPermissionMode: "workspace-write",
-        projectExecutionPermissionMode: "full",
-        thread: makeThread(),
-      }),
-    ).toBe("auto");
-  });
-
-  it("maps a legacy readonly execution to Accept Edits for future work", () => {
-    expect(
-      resolveThreadExecutionPermissionMode(registry, {
-        lastExecutionPermissionMode: "readonly",
-        projectExecutionPermissionMode: "full",
-        thread: makeThread(),
-      }),
-    ).toBe("accept-edits");
-  });
-
-  it("maps a legacy readonly parent execution before inheriting it", () => {
-    expect(
-      resolveThreadExecutionPermissionMode(registry, {
-        parentThread: makeParentThread(),
-        parentThreadExecutionPermissionMode: "readonly",
-        projectExecutionPermissionMode: "full",
-        thread: makeThread({
-          parentThreadId: "thr-parent-1",
-          providerId: "codex",
-        }),
-      }),
-    ).toBe("accept-edits");
-  });
-
-  it("uses project permission defaults for child threads without parent execution history", () => {
-    expect(
-      resolveThreadExecutionPermissionMode(registry, {
-        parentThread: makeParentThread(),
-        projectExecutionPermissionMode: "full",
-        thread: makeThread({
-          parentThreadId: "thr-parent-1",
-          providerId: "codex",
-        }),
-      }),
-    ).toBe("full");
-  });
-
-  it("resolves an inherited mode to the child provider supported mode", () => {
-    expect(
-      resolveThreadExecutionPermissionMode(registry, {
-        parentThread: makeParentThread(),
-        parentThreadExecutionPermissionMode: "workspace-write",
-        projectExecutionPermissionMode: "accept-edits",
-        thread: makeThread({
-          parentThreadId: "thr-parent-1",
-          providerId: "pi",
-        }),
-      }),
-    ).toBe("full");
-  });
-
-  it("honors an explicitly requested mode above the parent's mode", () => {
-    expect(
-      resolveThreadExecutionPermissionMode(registry, {
-        requestedPermissionMode: "full",
-        parentThread: makeParentThread(),
-        parentThreadExecutionPermissionMode: "auto",
-        thread: makeThread({
-          parentThreadId: "thr-parent-1",
-          providerId: "codex",
-        }),
-      }),
-    ).toBe("full");
-  });
-
-  it("preserves the child's recorded mode above the parent's current mode", () => {
-    expect(
-      resolveThreadExecutionPermissionMode(registry, {
-        lastExecutionPermissionMode: "full",
-        parentThread: makeParentThread(),
-        parentThreadExecutionPermissionMode: "auto",
-        thread: makeThread({
-          parentThreadId: "thr-parent-1",
-          providerId: "codex",
-        }),
-      }),
-    ).toBe("full");
-  });
-
-  it("allows a child to run below its parent's mode", () => {
-    expect(
-      resolveThreadExecutionPermissionMode(registry, {
-        requestedPermissionMode: "accept-edits",
-        parentThread: makeParentThread(),
-        parentThreadExecutionPermissionMode: "full",
-        thread: makeThread({
-          parentThreadId: "thr-parent-1",
-          providerId: "codex",
-        }),
-      }),
-    ).toBe("accept-edits");
-  });
-
-  it("uses root-thread defaults when the parent reference is not live", () => {
-    expect(
-      resolveThreadExecutionPermissionMode(registry, {
-        parentThread: makeParentThread({
-          deletedAt: Date.now(),
-        }),
-        projectExecutionPermissionMode: "accept-edits",
-        thread: makeThread({
-          parentThreadId: "thr-deleted-parent-1",
-          providerId: "codex",
-        }),
-      }),
-    ).toBe("accept-edits");
-  });
-
-  it("still uses project permission defaults for root threads", () => {
-    expect(
-      resolveThreadExecutionPermissionMode(registry, {
-        projectExecutionPermissionMode: "accept-edits",
-        thread: makeThread(),
-      }),
-    ).toBe("accept-edits");
   });
 });

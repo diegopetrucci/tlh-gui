@@ -31,6 +31,7 @@ const plugins: InstalledPlugin[] = [];
 const artifactMetaSchema = z.object({
   sdkMajor: z.number().int(),
   sdkVersion: z.string(),
+  runtimeSlots: z.array(z.string()),
 });
 for (const id of ["navigation", "thread-list"]) {
   const source = new URL(
@@ -64,6 +65,7 @@ for (const id of ["navigation", "thread-list"]) {
     isOrphanedBuiltin: false,
     publisherLabel: "BB Official",
     sourceDisplay: "Built-in demo frontend",
+    sourceNotice: null,
     updateState: {},
     enabled: true,
     description: pkg.bb.description,
@@ -90,6 +92,7 @@ for (const id of ["navigation", "thread-list"]) {
         sdkMajor: meta.sdkMajor,
         sdkVersion: meta.sdkVersion,
         compatible: true,
+        runtimeSlots: meta.runtimeSlots,
       },
     },
     logoUrl: null,

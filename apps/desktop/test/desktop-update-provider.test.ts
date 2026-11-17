@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  createDesktopReleaseInfo,
   createDesktopUpdateFeedUrl,
   resolveDesktopUpdateSupport,
 } from "../src/desktop-update-provider.js";
@@ -15,6 +16,23 @@ describe("desktop update feed url", () => {
     expect(createDesktopUpdateFeedUrl("windows")).toBe(
       "https://github.com/diegopetrucci/tlh-gui/releases/download/desktop-latest/desktop-version-windows.json",
     );
+  });
+});
+
+describe("desktop release identity", () => {
+  it("uses the fork app ids and fork-only release feed for each channel", () => {
+    const latest = createDesktopReleaseInfo("latest");
+    const nightly = createDesktopReleaseInfo("nightly");
+
+    expect(latest.appId).toBe("com.thelastharness.gui");
+    expect(nightly.appId).toBe("com.thelastharness.gui.nightly");
+    for (const info of [latest, nightly]) {
+      expect(info.updateReleaseBaseUrl).toMatch(
+        /^https:\/\/github\.com\/diegopetrucci\/tlh-gui\/releases\/download\//,
+      );
+      expect(info.updateReleaseBaseUrl).not.toContain("get-bb");
+      expect(info.appId).not.toContain("dev.bb");
+    }
   });
 });
 

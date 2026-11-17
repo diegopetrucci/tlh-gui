@@ -107,7 +107,6 @@ const conversationRows: TimelineRow[] = [
 ];
 
 const afterCutoffPlacement: ThreadTimelineUnreadDividerPlacement = {
-  kind: "after-cutoff",
   cutoffAt: T0 + 3 * MINUTE + 30_000,
 };
 

@@ -17,6 +17,7 @@ import type {
 } from "../app-contract.js";
 
 type ExpectedBbPluginApiKey =
+  | "internal_DO_NOT_USE_recordPluginUse"
   | "agents"
   | "background"
   | "cli"
@@ -283,7 +284,6 @@ describe("backend plugin SDK public surface", () => {
       backgroundAgents: number;
       backgroundCommands: number;
       planMode: number;
-      goals: number;
     }>();
   });
 

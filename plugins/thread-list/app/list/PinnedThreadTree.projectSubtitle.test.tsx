@@ -8,7 +8,6 @@ import {
 } from "@get-bb/plugin-sdk/testing/app";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { NO_COLLAPSED_CHILD_ACTIVITY } from "../model/thread-activity.js";
 import { makeSidebarThread } from "../model/fixtures.js";
 import type {
   EnvironmentThreadGroup,
@@ -37,7 +36,7 @@ const PROJECTS = [
   settingsHref: `/projects/${project.id}/settings`,
 }));
 
-const STATS = { childCount: 0, childActivity: NO_COLLAPSED_CHILD_ACTIVITY };
+const STATS = { childCount: 0, hiddenThreads: [] };
 
 function pinned(
   id: string,

@@ -1,4 +1,4 @@
-import { type HostDaemonRpcCommand } from "@bb/host-daemon-contract";
+import type { HostDaemonRpcCommand } from "@bb/host-daemon-contract";
 
 const hostCommandWakePolicy = {
   "desktop.broker.prove": "never",
@@ -60,10 +60,10 @@ const hostCommandWakePolicy = {
   "host.install_global_skills": "work",
   "host.global_skills_status": "work",
   "host.inspect_git_source": "work",
+  "host.inspect_git_checkout": "work",
   "host.list_branch_options": "work",
   "host.read_file": "work",
   "host.read_file_chunk": "work",
-  "host.read_file_relative": "work",
   "host.write_file": "work",
   "provider.list_models": "work",
   "provider.list_commands": "work",
@@ -72,10 +72,6 @@ const hostCommandWakePolicy = {
   "provider.installation.run": "work",
   "provider.usage": "work",
   "host.discover_repos": "work",
-  "workspace.status": "work",
-  "workspace.diff": "work",
-  "workspace.diffFiles": "work",
-  "workspace.diffPatch": "work",
 } satisfies Record<HostDaemonRpcCommand["type"], "never" | "work">;
 
 export function hostCommandMayWake(command: HostDaemonRpcCommand): boolean {

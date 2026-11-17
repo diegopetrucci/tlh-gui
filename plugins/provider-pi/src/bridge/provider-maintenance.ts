@@ -1,12 +1,12 @@
-import { execFile } from "node:child_process";
+import { experimental_execHostFile } from "@get-bb/plugin-sdk/process";
 import { open, realpath } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
 import {
   type ProviderHealthResult,
   type ProviderInstallationCommand,
   type ProviderInstallationRunResult,
+  type ProviderInstallationSource,
   type ProviderInstallationStatus,
   experimental_commandOutput as commandOutput,
   experimental_compareVersions as compareVersions,
@@ -24,21 +24,21 @@ import {
   tlhInstallGuidance,
   tlhInstallationRun,
 } from "./tlh-maintenance.js";
-import { resolvePiLaunch, resolvePiProcessLaunch } from "./rpc-child.js";
+import { resolvePiManagedInstallRoot } from "./pi-managed-install.js";
+import { resolvePiLaunch } from "./rpc-child.js";
 import {
   DEFAULT_PI_BRIDGE_OPTIONS,
   type PiBridgeOptions,
 } from "../bridge-options.js";
 
-const execFileAsync = promisify(execFile);
+const execFileAsync = experimental_execHostFile;
 export const PI_MINIMUM_SUPPORTED_VERSION = "0.84.0";
 export const PI_NPM_PACKAGE = "@earendil-works/pi-coding-agent";
 const VERSION_PROBE_TIMEOUT_MS = 15_000;
 const INSTALL_GATE_TTL_MS = 30_000;
 
 type PiVersionProbe =
-  | { version: string; failure: null }
-  | { version: null; failure: string };
+  { version: string; failure: null } | { version: null; failure: string };
 
 function bunCommand(): string {
   return process.platform === "win32" ? "bun.exe" : "bun";
@@ -130,32 +130,49 @@ async function isBunManagedPi(executablePath: string | null): Promise<boolean> {
   );
 }
 
-async function piGlobalInstallCommand(
+function piSelfUpdateCommand(): ProviderInstallationCommand {
+  const launch = resolvePiLaunch(process.env);
+  const args = [...launch.args, "update", "--self"];
+  return {
+    command: launch.command,
+    args,
+    displayCommand: formatCommand(launch.command, args),
+  };
+}
+
+function isPiManagedInstall(executablePath: string | null): boolean {
+  return (
+    executablePath !== null &&
+    resolvePiManagedInstallRoot(executablePath) !== null
+  );
+}
+
+async function piInstallationCommand(
+  action: "install" | "update",
   executablePath: string | null,
+  installSource: ProviderInstallationSource,
 ): Promise<ProviderInstallationCommand> {
-  return (await isBunManagedPi(executablePath))
-    ? bunGlobalInstallCommand(PI_NPM_PACKAGE)
-    : npmGlobalInstallCommand(PI_NPM_PACKAGE);
+  if (action === "install") return npmGlobalInstallCommand(PI_NPM_PACKAGE);
+  if (isPiManagedInstall(executablePath)) return piSelfUpdateCommand();
+  if (await isBunManagedPi(executablePath)) {
+    return bunGlobalInstallCommand(PI_NPM_PACKAGE);
+  }
+  return installSource === "npmGlobal"
+    ? npmGlobalInstallCommand(PI_NPM_PACKAGE)
+    : piSelfUpdateCommand();
 }
 
 export async function probePiVersion(
   options: PiBridgeOptions = DEFAULT_PI_BRIDGE_OPTIONS,
 ): Promise<PiVersionProbe> {
-  const launch = resolvePiProcessLaunch(
-    process.env,
-    process.env,
-    process.cwd(),
-    options,
-  );
+  const launch = resolvePiLaunch(process.env, options);
   const display = formatCommand(launch.command, [...launch.args, "--version"]);
   let stdout: string;
   try {
     ({ stdout } = await execFileAsync(
       launch.command,
       [...launch.args, "--version"],
-      {
-        timeout: VERSION_PROBE_TIMEOUT_MS,
-      },
+      { timeout: VERSION_PROBE_TIMEOUT_MS },
     ));
   } catch (error) {
     return {
@@ -223,25 +240,31 @@ export async function getPiProviderInstallationStatus(
     : needsUpdate || versionUnsupported
       ? "update"
       : null;
+  const installSource = npmGlobalInstallSource({
+    installed,
+    executablePath: resolvedExecutable,
+    npmBin: npmGlobal.npmBin,
+  });
   const installAction: ProviderInstallationStatus["installAction"] =
     actionKind === null || !checkUpdates
       ? null
       : {
           kind: actionKind,
           label: actionKind === "install" ? "Install" : "Update",
-          command: (await piGlobalInstallCommand(resolvedExecutable))
-            .displayCommand,
+          command: (
+            await piInstallationCommand(
+              actionKind,
+              resolvedExecutable,
+              installSource,
+            )
+          ).displayCommand,
         };
 
   return {
     executableName: "pi",
     executablePath: resolvedExecutable,
     installed,
-    installSource: npmGlobalInstallSource({
-      installed,
-      executablePath: resolvedExecutable,
-      npmBin: npmGlobal.npmBin,
-    }),
+    installSource,
     currentVersion,
     latestVersion,
     minimumSupportedVersion: PI_MINIMUM_SUPPORTED_VERSION,
@@ -284,7 +307,11 @@ export async function getPiProviderInstallationRun(
   }
   return {
     available: true,
-    command: await piGlobalInstallCommand(status.executablePath),
+    command: await piInstallationCommand(
+      action,
+      status.executablePath,
+      status.installSource,
+    ),
     verification: installationVerification(status, action),
   };
 }
@@ -338,9 +365,13 @@ export function piNotInstalledMessage(options: PiBridgeOptions): string {
   }
 }
 
-async function installGuidance(options: PiBridgeOptions): Promise<string> {
-  return options.maintenance === "tlh"
-    ? tlhInstallGuidance(options)
+async function installGuidance(
+  options: PiBridgeOptions,
+  executablePath: string,
+): Promise<string> {
+  if (options.maintenance === "tlh") return tlhInstallGuidance(options);
+  return isPiManagedInstall(executablePath)
+    ? `Update Pi to ${PI_MINIMUM_SUPPORTED_VERSION} or newer: ${piSelfUpdateCommand().displayCommand}`
     : `Install ${PI_NPM_PACKAGE} ${PI_MINIMUM_SUPPORTED_VERSION} or newer: ${npmGlobalInstallCommand(PI_NPM_PACKAGE).displayCommand}`;
 }
 
@@ -348,7 +379,8 @@ async function probePiInstallGate(
   options: PiBridgeOptions,
 ): Promise<PiInstallGate> {
   const launch = resolvePiLaunch(process.env, options);
-  if ((await resolveExecutablePath(launch.command)) === null) {
+  const executablePath = await resolveExecutablePath(launch.command);
+  if (executablePath === null) {
     return {
       ok: false,
       status: "not_installed",
@@ -358,7 +390,7 @@ async function probePiInstallGate(
   }
   const probe = await probePiVersion(options);
   if (probe.version === null) {
-    const statusMessage = `Could not determine the ${options.command} version: ${probe.failure}. ${await installGuidance(options)}`;
+    const statusMessage = `Could not determine the ${options.command} version: ${probe.failure}. ${await installGuidance(options, executablePath)}`;
     return {
       ok: false,
       status: "unknown",
@@ -368,7 +400,7 @@ async function probePiInstallGate(
   }
   const installedVersion = probe.version;
   if (compareVersions(installedVersion, PI_MINIMUM_SUPPORTED_VERSION) < 0) {
-    const statusMessage = `${options.displayName} ${installedVersion} is older than the supported minimum ${PI_MINIMUM_SUPPORTED_VERSION}. ${await installGuidance(options)}`;
+    const statusMessage = `${options.displayName} ${installedVersion} is older than the supported minimum ${PI_MINIMUM_SUPPORTED_VERSION}. ${await installGuidance(options, executablePath)}`;
     return {
       ok: false,
       status: "unsupported_version",

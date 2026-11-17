@@ -9,7 +9,11 @@ interface ExtensionHarness {
   emitBusEvent(channel: string, value: unknown): void;
 }
 
-function createExtensionHarness(withEventBus: boolean): ExtensionHarness {
+const CHANNEL_TOKEN = "test-channel-token";
+
+async function createExtensionHarness(
+  withEventBus: boolean,
+): Promise<ExtensionHarness> {
   const messages: Record<string, unknown>[] = [];
   const piHandlers = new Map<
     string,
@@ -21,36 +25,47 @@ function createExtensionHarness(withEventBus: boolean): ExtensionHarness {
   const busHandlers = new Map<string, Set<(value: unknown) => void>>();
   const context = { sessionManager: { getLeafId: () => null } };
   const source = BB_PI_EXTENSION_SOURCE.replace(/^import .*;$/gm, "").replace(
-    "export default function bbExtension",
-    "function bbExtension",
+    "export default async function bbExtension",
+    "async function bbExtension",
   );
   const factory = runInNewContext(`${source}; bbExtension`, {
     Buffer,
     PiRuntime: { VERSION: "0.84.0", SessionManager: {} },
     StringDecoder,
     Type: {},
-    process: { env: {} },
+    process: {
+      env: {
+        BB_PI_BRIDGE_CHANNEL: "bridge-channel-address",
+        BB_PI_BRIDGE_CHANNEL_TOKEN: CHANNEL_TOKEN,
+      },
+    },
     readFileSync: () => "[]",
     renameSync: () => undefined,
-    writeSync: (
-      _fd: number,
-      buffer: Buffer,
-      offset: number,
-      length: number,
-    ) => {
-      messages.push(
-        JSON.parse(buffer.subarray(offset, offset + length).toString()),
-      );
-      return length;
+    connect: () => {
+      const socket = {
+        writable: true,
+        on() {
+          return socket;
+        },
+        off() {
+          return socket;
+        },
+        once(event: string, handler: () => void) {
+          if (event === "connect") queueMicrotask(handler);
+          return socket;
+        },
+        unref() {},
+        write(text: string) {
+          for (const line of text.split("\n")) {
+            if (!line || line === CHANNEL_TOKEN) continue;
+            messages.push(JSON.parse(line));
+          }
+          return true;
+        },
+      };
+      return socket;
     },
-    Socket: class {
-      on() {
-        return this;
-      }
-
-      unref() {}
-    },
-  }) as (pi: Record<string, unknown>) => void;
+  }) as (pi: Record<string, unknown>) => Promise<void>;
   const pi: Record<string, unknown> = {
     registerTool: () => undefined,
     on(type: string, handler: unknown) {
@@ -76,7 +91,7 @@ function createExtensionHarness(withEventBus: boolean): ExtensionHarness {
       },
     };
   }
-  factory(pi);
+  await factory(pi);
   return {
     messages,
     async emitPiEvent(type, payload = {}) {
@@ -104,7 +119,7 @@ function detachedMessages(
 
 describe("injected detached-run extension forwarding", () => {
   it("forwards only minimal validated activity and completion fields", async () => {
-    const harness = createExtensionHarness(true);
+    const harness = await createExtensionHarness(true);
     await harness.emitPiEvent("session_start");
     harness.emitBusEvent("tlh:effective-activity", {
       activeAsyncJobIds: [" run-1 ", "run-2"],
@@ -133,13 +148,13 @@ describe("injected detached-run extension forwarding", () => {
   });
 
   it("does not use the Pi event handler path when the event bus is unavailable", async () => {
-    const harness = createExtensionHarness(false);
+    const harness = await createExtensionHarness(false);
     await harness.emitPiEvent("session_start");
     expect(detachedMessages(harness)).toEqual([]);
   });
 
   it("rejects malformed bus payloads and disposes listeners at shutdown", async () => {
-    const harness = createExtensionHarness(true);
+    const harness = await createExtensionHarness(true);
     await harness.emitPiEvent("session_start");
     harness.emitBusEvent("tlh:effective-activity", {
       activeAsyncJobIds: ["run-1", 2],

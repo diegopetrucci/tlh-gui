@@ -32,6 +32,7 @@ export {
   listPromptHistoryPage,
   listStoredProjectPromptHistoryRows,
   listStoredThreadPromptHistoryRows,
+  PROMPT_HISTORY_ENTRY_MAX_BYTES,
 } from "./prompt-history.js";
 export type {
   ListPromptHistoryPageArgs,
@@ -67,7 +68,6 @@ export {
 export {
   createThread,
   InvalidLifecycleOwnerError,
-  countLiveThreadsInEnvironment,
   countThreads,
   countNonDeletedAssignedChildThreads,
   getThread,
@@ -81,6 +81,8 @@ export {
   listActiveHostThreads,
   listActiveVisiblePinnedThreadRootsWithPendingInteractionState,
   listLiveThreadsInEnvironment,
+  liveThread,
+  threadHoldsEnvironment,
   listThreadMentionRowsByIds,
   listNonDeletedChildThreads,
   listThreadEnvironmentAssignmentsOnHost,
@@ -123,8 +125,11 @@ export type {
 } from "./threads.js";
 
 export {
+  deletePluginRecommendationId,
   forgetPluginProviders,
   getAiServiceSelections,
+  getPluginRecommendationId,
+  setPluginRecommendationId,
   getAppKeybindingOverrides,
   claimInstallTurnNumber,
   getAppSettings,
@@ -137,6 +142,12 @@ export {
   setDisabledPluginProviderCatalog,
   setDisabledProviderIds,
   setPluginSafeMode,
+  isAppUpdateSendHoldSet,
+  setAppUpdateSendHold,
+  getAutoAppUpdate,
+  getSkippedAppUpdate,
+  setAutoAppUpdate,
+  setSkippedAppUpdate,
 } from "./app-settings.js";
 export { getStoredThreadTabs, replaceStoredThreadTabs } from "./thread-tabs.js";
 export {
@@ -227,7 +238,7 @@ export {
   createPluginStateSnapshot,
   deletePluginStateSnapshot,
   getPluginStateSnapshot,
-  listExpiredPluginStateSnapshots,
+  listDiscardablePluginStateSnapshots,
   listGarbageCollectablePluginArtifacts,
   listIncompletePluginRollbackSnapshots,
   listPluginStateSnapshots,
@@ -301,17 +312,24 @@ export {
   findStoredEventRow,
   getActiveStoredTurnId,
   isStoredTurnMainRunIdle,
+  isStoredTurnContextCompactionOnly,
+  isStoredTurnProviderCompactionRunning,
   hasRootStoredTurnStarted,
   hasStoredSpawnAgentToolCall,
   hasStoredTerminalClientTurnRequestEvent,
+  findLatestUnresolvedClientTurnRequestIdAfterSequence,
+  hasStoredTurnCompleted,
   hasStoredTurnStarted,
   classifyStoredProviderThreadClaim,
   wouldRemoveSharedProviderSessionClaim,
   getLastStoredProviderThreadId,
   getStoredProviderSession,
   getLastStoredTurnRequestEvent,
+  hasStoredTurnRequestEventSince,
+  listStoredTaskTurnRequestEvents,
+  listLatestTurnFinalAgentMessageEventRows,
+  getTurnFinalAgentMessageEventRow,
   getStoredTurnRequestEventForTurn,
-  getLatestThreadOutputEventRow,
   getLatestStoredConversationOutlineSequence,
   getLatestCompletedThreadContextClearSequence,
   getLatestThreadSystemErrorEventRow,
@@ -327,9 +345,12 @@ export {
   listTimelineWindowHintsDescending,
   getFirstParentedTimelineBoundarySequence,
   getTimelineGroupingContextChangesInRange,
+  listAppendedEventRows,
   listStoredEventRowsInSequenceRange,
+  selectAppendedTimelineWindowRows,
   listTimelineOrderingContext,
   listTimelineInterruptionRows,
+  advanceTimelineWindowBudgetFloorSequence,
   findTimelineWindowBudgetFloorSequence,
   findStoredTimelineWindowByteBudgetFloor,
   isTimelineCursorSequencePresent,
@@ -363,6 +384,9 @@ export {
   listOpenTurnInputAcceptedRowsByThreadIds,
   listOpenBackgroundTaskItemRowsForHost,
   listOpenBackgroundTaskItemRowsForThread,
+  listOwnerStoppedBackgroundTaskRowsForHost,
+  getUnfinishedCommandItemData,
+  listCommandItemDataByItemIds,
   listThreadEventSuffixBackgroundSettlementRows,
   listThreadIdsStoppedSinceLastTurnStart,
   listThreadIdsWithLatestHostDaemonRestartInterruption,
@@ -403,8 +427,10 @@ export type {
 export {
   countTerminalSessions,
   createTerminalSession,
+  EXITED_TERMINAL_SESSION_ROW_RETENTION_MS,
   getTerminalSession,
   listTerminalSessions,
+  pruneExitedTerminalSessions,
   updateTerminalSession,
   updateTerminalSessions,
 } from "./terminal-sessions.js";
@@ -423,6 +449,7 @@ export {
   interruptPendingInteractionsForThreads,
   interruptPendingInteractionsForPlugin,
   listActivePluginPendingInteractions,
+  listActiveProviderPendingInteractionsForHost,
   listPendingInteractionsByThread,
   setPendingInteractionInterrupted,
   setPendingInteractionResolving,
@@ -448,16 +475,22 @@ export {
   createQueuedThreadMessageInTransaction,
   deleteQueuedRetriesForThreadEventSuffixInTransaction,
   deleteClaimedQueuedThreadMessageBatchInTransaction,
+  deleteCoalescedQueuedThreadMessageInTransaction,
   deleteQueuedThreadMessage,
+  getPendingCoalescedQueuedThreadMessage,
   getQueuedThreadMessage,
   getQueuedThreadStartMessage,
+  getFirstUnclaimedQueuedRetry,
+  hasLiveQueuedRetry,
   hasQueuedRetryOfTurnRequest,
+  moveQueuedThreadMessageToFrontInTransaction,
   hasClaimedQueuedThreadMessages,
   holdQueuedThreadMessageForEdit,
   isOrdinaryTurnEndQueuedMessage,
   isThreadQueueAutoSendPaused,
   listDueScheduledQueuedThreadMessages,
   listIdleThreadsWithQueuedMessages,
+  listReadySystemNoticesOnBusyThreads,
   listQueuedThreadMessageCountsByThreadIds,
   listQueuedThreadMessagePluginWaitRefs,
   listQueuedThreadMessages,
@@ -466,6 +499,7 @@ export {
   listQueuedThreadMessagesWaitingOnKind,
   listRetryableFailedQueuedThreadMessages,
   listThreadIdsWithHostOfflineQueueWaits,
+  listThreadIdsWithAppUpdateQueueWaits,
   releaseQueuedMessageClaim,
   releaseQueuedThreadMessageEditHold,
   requeueClaimedQueuedThreadMessages,
@@ -474,10 +508,13 @@ export {
   releaseStaleQueuedMessageClaims,
   reorderQueuedThreadMessage,
   setQueuedThreadMessageGroupBoundary,
+  supersedeQueuedRetriesInTransaction,
+  updateCoalescedQueuedThreadMessageInTransaction,
   updateQueuedThreadMessage,
 } from "./queued-thread-messages.js";
 export type {
   ClaimedQueuedThreadMessageRow,
+  QueuedThreadMessageExecution,
   QueuedThreadMessageGroupClaimPolicy,
   QueuedThreadMessageGroupEligibility,
   QueuedThreadMessageRow,
@@ -495,26 +532,22 @@ export {
   pruneClosedSessions,
 } from "./sweeps.js";
 export {
-  compactDatabase,
   dropDeferredLegacyTables,
   runIncrementalVacuum,
   getDatabaseAutoVacuumMode,
-  DATABASE_COMPACTION_MIN_RECLAIMABLE_BYTES,
-  DATABASE_COMPACTION_MIN_RECLAIMABLE_RATIO,
   DATABASE_INCREMENTAL_VACUUM_MIN_FREELIST_PAGES,
   DATABASE_INCREMENTAL_VACUUM_MAX_PAGES,
   DATABASE_MAINTENANCE_BUSY_TIMEOUT_MS,
-  getDatabaseCompactionStats,
   getDatabaseFreelistStats,
   getDatabaseMaintenanceActivity,
   isDatabaseMaintenanceIdle,
   listDeferredLegacyTables,
-  shouldCompactDatabase,
   shouldRunIncrementalVacuum,
 } from "./maintenance.js";
 export * from "./machines.js";
 export {
   advanceThreadPruning,
+  deleteThreadScopedPruningCursors,
   getNextThreadPruningPolicy,
   THREAD_PRUNING_POLICIES,
 } from "./thread-pruning.js";
@@ -529,12 +562,3 @@ export {
 export * from "./project-attachments.js";
 
 export * from "./project-attachment-backfill.js";
-export {
-  clearDiffViewedFiles,
-  listDiffViewedFiles,
-  markDiffViewedFile,
-} from "./diff-viewed-files.js";
-export type {
-  DiffViewedFileRecord,
-  DiffViewedFileScope,
-} from "./diff-viewed-files.js";
