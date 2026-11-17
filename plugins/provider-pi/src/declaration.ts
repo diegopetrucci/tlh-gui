@@ -16,7 +16,7 @@ function flavorStrings(flavor: PiFlavor): PluginProviderDeclaration["strings"] {
     signInHint: `Run \`${loginCommand}\` on the machine to sign in.`,
     expiredHint: `Your ${displayName} session expired. Run \`${loginCommand}\`, then reload.`,
     installUrl: flavor === "pi" ? "https://pi.dev" : TLH_INSTALL_URL,
-    iconTint: ICON_TINT,
+    ...(flavor === "pi" ? { iconTint: ICON_TINT } : {}),
   };
 }
 
@@ -31,7 +31,7 @@ export function piProviderDeclaration(
   return {
     id: flavor,
     displayName: options.displayName,
-    icon: "./icons/pi.svg",
+    icon: flavor === "pi" ? "./icons/pi.svg" : "./icons/tlh.svg",
     strings: flavorStrings(flavor),
     experimental_visibility: flavor === "tlh" ? "always" : "installed",
     experimental_bridgeOptions: { ...options },
