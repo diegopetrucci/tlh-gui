@@ -167,10 +167,14 @@ export type ThreadRowOptions =
 interface ThreadRowProps {
   thread: SidebarThread;
   crossProjectId: string | null;
+  showProjectSubtitle?: boolean;
   isActive: boolean;
   onProjectSelect?: () => void;
   options: ThreadRowOptions;
 }
+
+const PROJECT_SUBTITLE_ROW_HEIGHT_CLASS =
+  "h-(--bb-sidebar-row-height-subtitle) max-md:pointer-coarse:h-(--bb-sidebar-row-height-subtitle-coarse)";
 
 type ThreadRowClickCaptureHandler = MouseEventHandler<HTMLDivElement>;
 
@@ -186,6 +190,7 @@ interface ThreadRowContainerArgs {
   onClickCapture?: ThreadRowClickCaptureHandler;
   onSplitDragPointerDown?: PointerEventHandler<HTMLElement>;
   stickyLevel?: number;
+  hasProjectSubtitle: boolean;
   style: CSSProperties;
 }
 
@@ -228,10 +233,12 @@ function renderThreadRowContainer({
   reorderPlacement,
   selected,
   stickyLevel,
+  hasProjectSubtitle,
   style,
 }: ThreadRowContainerArgs) {
   const containerProps = {
     "data-sidebar-rename-row": "",
+    "data-sidebar-project-subtitle": hasProjectSubtitle ? "" : undefined,
     className,
     style,
     "data-sidebar-nest-target": nestTargetState ?? undefined,
@@ -373,9 +380,31 @@ function useThreadSplitMiniMap(
   }, [layout, threadId]);
 }
 
+function ThreadRowTitleBlock({
+  children,
+  projectName,
+}: {
+  children: ReactNode;
+  projectName: string | null;
+}) {
+  if (projectName === null) return children;
+  return (
+    <span className="flex min-w-0 flex-1 flex-col justify-center">
+      {children}
+      <span
+        data-sidebar-thread-project-subtitle=""
+        className="min-w-0 truncate text-2xs text-muted-foreground"
+      >
+        {projectName}
+      </span>
+    </span>
+  );
+}
+
 function ThreadRowComponent({
   thread,
   crossProjectId,
+  showProjectSubtitle = false,
   isActive,
   onProjectSelect,
   options,
@@ -411,6 +440,9 @@ function ThreadRowComponent({
       : crossProjectName
         ? `In project ${crossProjectName}`
         : "In another project";
+  const subtitleProjectName =
+    useSidebarProjectName(showProjectSubtitle ? thread.projectId : null) ??
+    null;
   const handleRename = useCallback(
     async (nextTitle: string) => {
       await sdk.threads.update({ threadId: thread.id, title: nextTitle });
@@ -553,9 +585,11 @@ function ThreadRowComponent({
     SIDEBAR_ROW_BASE_CLASS,
     LIST_HOVER_TRANSITION,
     parentOptions?.stickyLevel === undefined && "relative",
-    options.isCompact
-      ? COARSE_POINTER_COMPACT_ROW_HEIGHT_CLASS
-      : COARSE_POINTER_ROW_HEIGHT_CLASS,
+    subtitleProjectName !== null
+      ? PROJECT_SUBTITLE_ROW_HEIGHT_CLASS
+      : options.isCompact
+        ? COARSE_POINTER_COMPACT_ROW_HEIGHT_CLASS
+        : COARSE_POINTER_ROW_HEIGHT_CLASS,
     showActive
       ? SIDEBAR_ROW_SELECTED_STATE_CLASS
       : SIDEBAR_ROW_INTERACTIVE_STATE_CLASS,
@@ -714,16 +748,20 @@ function ThreadRowComponent({
               {editor}
             </span>
           ) : (
-            <span
-              className={cn(
-                "bb-thread-title",
-                crossProjectLabel !== null && "min-w-0 truncate",
-              )}
-              title={labelTitle}
-              onDoubleClick={startTitleEditing}
-            >
-              <ThreadTitle threadId={thread.id} />
-            </span>
+            <ThreadRowTitleBlock projectName={subtitleProjectName}>
+              <span
+                className={cn(
+                  "bb-thread-title",
+                  (crossProjectLabel !== null ||
+                    subtitleProjectName !== null) &&
+                    "min-w-0 truncate",
+                )}
+                title={labelTitle}
+                onDoubleClick={startTitleEditing}
+              >
+                <ThreadTitle threadId={thread.id} />
+              </span>
+            </ThreadRowTitleBlock>
           )}
         </span>
         {crossProjectLabel !== null ? (
@@ -913,6 +951,7 @@ function ThreadRowComponent({
         : undefined,
     onSplitDragPointerDown: isEditing ? undefined : onSplitDragPointerDown,
     stickyLevel: parentOptions?.stickyLevel,
+    hasProjectSubtitle: subtitleProjectName !== null,
     style: rowStyle,
   });
 
