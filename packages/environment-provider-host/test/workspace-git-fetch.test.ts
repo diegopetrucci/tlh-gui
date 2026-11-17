@@ -136,9 +136,11 @@ describe("remote branch refresh", () => {
       await runGit(["remote", "add", name, remote], { cwd: repo });
       await runGit(["push", "-q", name, "main", "main:stale"], { cwd: repo });
       await runGit(["fetch", "-q", name], { cwd: repo });
-      await runGit(["push", "-q", remote, "main:fresh", ":stale"], {
-        cwd: repo,
+      const head = await runGit(["rev-parse", "main"], { cwd: repo });
+      await runGit(["update-ref", "refs/heads/fresh", head.stdout.trim()], {
+        cwd: remote,
       });
+      await runGit(["update-ref", "-d", "refs/heads/stale"], { cwd: remote });
     }
     return repo;
   }
