@@ -12,7 +12,7 @@
     "name": "TLH provider",
     "description": "Run bb threads with The Last Harness (TLH).",
     "branding": {
-      "icon": "./icons/pi.svg"
+      "icon": "./icons/tlh.svg"
     },
     "server": "./server.ts",
     "host": "./src/host.ts",
