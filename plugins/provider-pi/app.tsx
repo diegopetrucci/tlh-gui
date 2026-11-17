@@ -185,7 +185,29 @@ function ExtensionUiInteraction({
   );
 }
 
+function TlhMark({ className }: { className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="47 40 66 83.5"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M48 40h24v72H48zM88 40h24v72H88z" fill="currentColor" />
+      <path d="M68 73h32v16H68z" fill="#f05a28" />
+      <rect x="47" y="116.5" width="66" height="7" fill="#2bb8c5" />
+    </svg>
+  );
+}
+
 export default definePluginApp((app) => {
+  for (const providerId of ["tlh", "tlh-main"]) {
+    app.slots.experimental_providerIcon({
+      providerKind: "agent",
+      providerId,
+      icon: TlhMark,
+    });
+  }
   app.slots.pendingInteraction({
     id: PI_EXTENSION_UI_RENDERER_ID,
     component: ExtensionUiInteraction,

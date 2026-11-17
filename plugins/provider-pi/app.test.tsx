@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent } from "@testing-library/react";
+import { act, cleanup, fireEvent, render as render_ } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
 import { PI_EXTENSION_UI_KIND } from "./src/extension-ui-contract.js";
@@ -29,6 +29,24 @@ function render(
     cancel: handlers.cancel ?? (async () => undefined),
   });
 }
+
+describe("tlh provider icons", () => {
+  it("registers the full-colour mark for tlh and tlh-main but not pi", () => {
+    expect(
+      app.providerIcons.map((r) => `${r.providerKind}:${r.providerId}`),
+    ).toEqual(["agent:tlh", "agent:tlh-main"]);
+  });
+
+  it("renders brand colours and sizes via className", () => {
+    const Icon = app.providerIcons[0]!.icon;
+    const { container } = render_(<Icon className="size-full" />);
+    const svg = container.querySelector("svg")!;
+    expect(svg.getAttribute("class")).toBe("size-full");
+    expect(container.innerHTML).toContain("#f05a28");
+    expect(container.innerHTML).toContain("#2bb8c5");
+    expect(container.innerHTML).toContain("currentColor");
+  });
+});
 
 describe("pi extension ui interaction", () => {
   it("submits the chosen option label for a select dialog", async () => {

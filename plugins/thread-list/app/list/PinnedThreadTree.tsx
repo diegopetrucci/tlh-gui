@@ -98,6 +98,7 @@ const PinnedRootItem = memo(function PinnedRootItem({
       node={node}
       depthOffset={0}
       isEnvGrouped={false}
+      showProjectSubtitle
       sectionDnd={sectionDnd}
       selectedThreadId={selectedThreadId}
       collapsedThreadIds={collapsedThreadIds}

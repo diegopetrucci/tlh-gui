@@ -161,6 +161,13 @@
     --bb-sidebar-sticky-label-height: 1.5rem;
     --bb-sidebar-sticky-label-gap: 0.25rem;
     --bb-sidebar-sticky-row-height: var(--bb-sidebar-row-height);
+    --bb-sidebar-sticky-subtitle-row-height: var(
+      --bb-sidebar-row-height-subtitle
+    );
+    --bb-sidebar-sticky-subtitle-row-extra: calc(
+      var(--bb-sidebar-sticky-subtitle-row-height) -
+        var(--bb-sidebar-sticky-row-height)
+    );
     --bb-sidebar-sticky-row-gap: 0.25rem;
     --bb-sidebar-sticky-child-row-gap: 0.125rem;
     --bb-sidebar-sticky-label-top: var(--bb-sidebar-sticky-stack-padding-top);
@@ -420,7 +427,8 @@
     --bb-sidebar-sticky-tier-top: calc(
       var(--bb-sidebar-sticky-parent-base-top) +
         var(--bb-sidebar-sticky-parent-level, 0) *
-        var(--bb-sidebar-sticky-parent-stride)
+        var(--bb-sidebar-sticky-parent-stride) +
+        var(--bb-sidebar-sticky-parent-extra, 0px)
     );
     --bb-sidebar-sticky-tier-height: var(--bb-sidebar-sticky-row-height);
     /* Shallower ancestors win the overlap, so z-index descends with depth. */
@@ -432,6 +440,13 @@
        with the compact child gap; the wider project row gap would clip it. */
     --bb-sidebar-sticky-tier-shield-bottom-height: var(
       --bb-sidebar-sticky-child-row-gap
+    );
+  }
+
+  [data-sidebar-sticky-stack]
+    [data-sidebar-sticky-tier="parent"][data-sidebar-project-subtitle] {
+    --bb-sidebar-sticky-tier-height: var(
+      --bb-sidebar-sticky-subtitle-row-height
     );
   }
 
@@ -461,6 +476,9 @@
   @media (max-width: 767px) and (pointer: coarse) {
     [data-sidebar-sticky-stack] {
       --bb-sidebar-sticky-row-height: var(--bb-sidebar-row-height-coarse);
+      --bb-sidebar-sticky-subtitle-row-height: var(
+        --bb-sidebar-row-height-subtitle-coarse
+      );
     }
   }
 }
@@ -629,6 +647,8 @@
   --radius: 0.5rem;
   --bb-sidebar-row-height: 1.75rem;
   --bb-sidebar-row-height-coarse: 2.5rem;
+  --bb-sidebar-row-height-subtitle: 2.75rem;
+  --bb-sidebar-row-height-subtitle-coarse: 3.5rem;
   --shadow-x: 0px;
   --shadow-y: 2px;
   --shadow-blur: 0px;
@@ -1099,4 +1119,3 @@ body.sidebar-resizing [data-sidebar="panel"] {
 [data-panel-group]:has([data-resize-handle-active]) [data-panel] {
   transition-property: opacity;
 }
-

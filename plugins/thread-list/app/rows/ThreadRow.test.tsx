@@ -98,6 +98,7 @@ interface HarnessProps {
   providers?: PluginProvidersState["providers"];
   isCompactViewport?: boolean;
   crossProjectId?: string | null;
+  showProjectSubtitle?: boolean;
   isActive?: boolean;
   options?: ThreadRowOptions;
   onRowEvent?: () => void;
@@ -113,6 +114,7 @@ function ThreadRowHarness({
   providers = [],
   isCompactViewport,
   crossProjectId = null,
+  showProjectSubtitle = false,
   isActive = false,
   options = DEFAULT_OPTIONS,
   onRowEvent,
@@ -123,6 +125,7 @@ function ThreadRowHarness({
     <ThreadRow
       thread={thread}
       crossProjectId={crossProjectId}
+      showProjectSubtitle={showProjectSubtitle}
       isActive={isActive}
       options={options}
     />
@@ -1175,6 +1178,72 @@ describe("ThreadRow", () => {
     );
 
     expect(onLinkClick).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the project name as a second line when requested", () => {
+    const { container } = renderThreadRow({
+      showProjectSubtitle: true,
+      projects: [
+        {
+          id: "proj_test",
+          name: "Web App",
+          isPersonal: false,
+          href: "/projects/proj_test",
+          settingsHref: "/projects/proj_test/settings",
+        },
+      ],
+      thread: createThread({ projectId: "proj_test" }),
+    });
+
+    const subtitle = container.querySelector(
+      "[data-sidebar-thread-project-subtitle]",
+    );
+    expect(subtitle?.textContent).toBe("Web App");
+    expect(
+      container
+        .querySelector("[data-sidebar-rename-row]")
+        ?.hasAttribute("data-sidebar-project-subtitle"),
+    ).toBe(true);
+  });
+
+  it("omits the project subtitle unless requested", () => {
+    const { container } = renderThreadRow({
+      projects: [
+        {
+          id: "proj_test",
+          name: "Web App",
+          isPersonal: false,
+          href: "/projects/proj_test",
+          settingsHref: "/projects/proj_test/settings",
+        },
+      ],
+      thread: createThread({ projectId: "proj_test" }),
+    });
+
+    expect(
+      container.querySelector("[data-sidebar-thread-project-subtitle]"),
+    ).toBeNull();
+    expect(
+      container
+        .querySelector("[data-sidebar-rename-row]")
+        ?.hasAttribute("data-sidebar-project-subtitle"),
+    ).toBe(false);
+  });
+
+  it("stays single-line when the project name does not resolve", () => {
+    const { container } = renderThreadRow({
+      showProjectSubtitle: true,
+      thread: createThread({ projectId: "proj_unknown" }),
+    });
+
+    expect(
+      container.querySelector("[data-sidebar-thread-project-subtitle]"),
+    ).toBeNull();
+    expect(
+      container
+        .querySelector("[data-sidebar-rename-row]")
+        ?.hasAttribute("data-sidebar-project-subtitle"),
+    ).toBe(false);
   });
 
   it("omits the cross-project marker for same-project rows", () => {

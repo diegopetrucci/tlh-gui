@@ -41,6 +41,7 @@ import {
 } from "@dnd-kit/sortable";
 import { createPortal } from "react-dom";
 import type { SidebarThread } from "../model/sidebar-thread.js";
+import { useSidebarProjectName } from "../model/use-sidebar-data.js";
 import { toast } from "sonner";
 import {
   experimental_ThreadStatusGlyph as ThreadStatusGlyph,
@@ -263,6 +264,15 @@ type ProjectThreadListClickCaptureHandler = MouseEventHandler<HTMLDivElement>;
 const EMPTY_PROJECT_THREADS: SidebarThread[] = [];
 const EMPTY_PINNED_ROOT_NODES: readonly ProjectThreadNode[] = [];
 const EMPTY_THREAD_SECTIONS: readonly SidebarSectionDefinition[] = [];
+type SubtitleParentDescendantsStyle = CSSProperties & {
+  "--bb-sidebar-sticky-parent-extra": string;
+};
+
+const SUBTITLE_PARENT_DESCENDANTS_STYLE: SubtitleParentDescendantsStyle = {
+  "--bb-sidebar-sticky-parent-extra":
+    "var(--bb-sidebar-sticky-subtitle-row-extra)",
+};
+
 const PROJECT_THREAD_TREE_EMPTY_STATE_CLASS = "py-0.5 px-2";
 
 interface ProjectThreadTreeGroupProps {
@@ -275,6 +285,7 @@ interface ThreadTreeNodeRowProps {
   node: ProjectThreadNode;
   depthOffset: number;
   isEnvGrouped: boolean;
+  showProjectSubtitle?: boolean;
   selectedThreadId?: string;
   collapsedThreadIds: Set<string>;
   collapsedEnvironmentIds: Set<string>;
@@ -290,6 +301,7 @@ interface ThreadTreeNodeRowProps {
 
 interface ThreadTreeItemRowProps {
   isEnvGrouped?: boolean;
+  showProjectSubtitle?: boolean;
   projectId: string | null;
   item: ProjectThreadItem;
   depthOffset: number;
@@ -342,6 +354,7 @@ function getItemProjectId(item: ProjectThreadItem): string | null {
 }
 
 interface EnvironmentThreadGroupRowProps {
+  showProjectSubtitle?: boolean;
   sectionDnd?: SectionThreadDndState;
   dragBindings?: SidebarSortableDragBindings;
   sortableRef?: (element: HTMLDivElement | null) => void;
@@ -919,6 +932,7 @@ function EnvironmentThreadGroupHeader({
 }
 
 const EnvironmentThreadGroupRow = memo(function EnvironmentThreadGroupRow({
+  showProjectSubtitle = false,
   sectionDnd,
   dragBindings,
   sortableRef,
@@ -1026,6 +1040,7 @@ const EnvironmentThreadGroupRow = memo(function EnvironmentThreadGroupRow({
                     sectionDnd={sectionDnd}
                     depthOffset={depthOffset + 1}
                     isEnvGrouped
+                    showProjectSubtitle={showProjectSubtitle}
                     selectedThreadId={selectedThreadIdWithin(
                       nodeItems[index],
                       selectedThreadId,
@@ -1078,6 +1093,7 @@ export const PinnedEnvironmentThreadGroupRow = memo(
         projectId={group.nodes[0].thread.projectId}
         environmentThreadGroup={group}
         sectionDnd={sectionDnd ?? undefined}
+        showProjectSubtitle
         dragBindings={dragBindings}
         sortableRef={setNodeRef}
         sortableStyle={
@@ -1100,6 +1116,7 @@ export const PinnedEnvironmentThreadGroupRow = memo(
 
 const ThreadTreeItemRow = memo(function ThreadTreeItemRow({
   isEnvGrouped = false,
+  showProjectSubtitle = false,
   projectId,
   item,
   depthOffset,
@@ -1148,6 +1165,7 @@ const ThreadTreeItemRow = memo(function ThreadTreeItemRow({
         node={item.node}
         depthOffset={depthOffset}
         isEnvGrouped={isEnvGrouped}
+        showProjectSubtitle={showProjectSubtitle}
         selectedThreadId={selectedThreadId}
         collapsedThreadIds={collapsedThreadIds}
         collapsedEnvironmentIds={collapsedEnvironmentIds}
@@ -1442,6 +1460,7 @@ export const ThreadTreeNodeRow = memo(function ThreadTreeNodeRow({
   node,
   depthOffset,
   isEnvGrouped,
+  showProjectSubtitle = false,
   selectedThreadId,
   collapsedThreadIds,
   collapsedEnvironmentIds,
@@ -1545,10 +1564,15 @@ export const ThreadTreeNodeRow = memo(function ThreadTreeNodeRow({
       collapsedEnvironmentIds,
       selectedThreadId,
     });
+  const hasProjectSubtitle =
+    useSidebarProjectName(
+      showProjectSubtitle ? node.thread.projectId : null,
+    ) !== undefined;
   const row = (
     <ThreadRow
       thread={node.thread}
       crossProjectId={crossProjectId}
+      showProjectSubtitle={showProjectSubtitle}
       isActive={selectedThreadId === node.thread.id}
       onProjectSelect={onProjectSelect}
       options={options}
@@ -1569,7 +1593,12 @@ export const ThreadTreeNodeRow = memo(function ThreadTreeNodeRow({
     >
       {row}
       {showChildren || nestPreviewThread !== null ? (
-        <div className="relative space-y-px">
+        <div
+          className="relative space-y-px"
+          style={
+            hasProjectSubtitle ? SUBTITLE_PARENT_DESCENDANTS_STYLE : undefined
+          }
+        >
           <ThreadTreeGroupLine parentRowDepth={parentRowDepth} />
           {showChildren ? (
             <SidebarWindowedItems
