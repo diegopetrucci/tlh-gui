@@ -145,6 +145,7 @@ export function minimalProviderRegistration(args: {
   return {
     info: args.info,
     serverCapabilities: args.serverCapabilities,
+    guidedSignIn: false,
     pluginId: args.pluginId,
     bridgeOptions: {},
     extensionKinds: {},
@@ -285,11 +286,16 @@ export async function buildScriptedEchoProviderArtifact(): Promise<PluginHostArt
   };
 }
 
+let scriptedEchoProviderArtifact:
+  | Promise<PluginHostArtifactSnapshot>
+  | undefined;
+
 export async function registerFakeProviders(
   registry: ProviderRegistryService,
   artifacts: PluginHostArtifactRegistry,
 ): Promise<void> {
-  const artifact = await buildScriptedEchoProviderArtifact();
+  const artifact = await (scriptedEchoProviderArtifact ??=
+    buildScriptedEchoProviderArtifact());
   for (const providerId of FAKE_PROVIDER_IDS) {
     const pluginId = `provider-${providerId}`;
     registry.register({

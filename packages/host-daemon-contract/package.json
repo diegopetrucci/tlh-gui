@@ -19,6 +19,11 @@
       "types": "./src/protocol.ts",
       "default": "./src/protocol.ts"
     },
+    "./skill-tree": {
+      "source": "./src/skill-tree.ts",
+      "types": "./src/skill-tree.ts",
+      "default": "./src/skill-tree.ts"
+    },
     "./workspace": {
       "source": "./src/workspace.ts",
       "types": "./src/workspace.ts",
@@ -35,13 +40,13 @@
     "@bb/domain": "workspace:*",
     "@bb/hono-typed-routes": "workspace:*",
     "@bb/provider-bridge-protocol": "workspace:*",
-    "hono": "^4.7.0",
-    "zod": "^4.3.6"
+    "hono": "^4.13.16",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@bb/test-helpers": "workspace:*",
     "@bb/tsconfig": "workspace:*",
-    "@types/node": "^22.0.0",
+    "@types/node": "^22.20.5",
     "tsrs": "0.18.0-ts7.1.0-dev.20260929",
     "typescript": "npm:@typescript/typescript6@^6.0.2"
   }

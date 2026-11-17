@@ -1,4 +1,15 @@
-import { hostDaemonContributedEnvEntrySchema } from "./commands.js";
+import {
+  hostDaemonContributedEnvEntrySchema,
+  type HostDaemonOnlineRpcCommandType,
+  type HostDaemonSettledCommandType,
+  hostDaemonConnectTunnelIdentitySchema,
+  hostDaemonOnlineRpcResultSchemaByType,
+  hostDaemonCommandResultSchemaByType,
+  hostDaemonSettledCommandTypeSchema,
+  hostDaemonRpcCommandSchema,
+  hostDaemonRpcCommandTypeSchema,
+  workspaceContextSchema,
+} from "./commands.js";
 import { desktopBrowserChangedSchema } from "./desktop-browser.js";
 import {
   serverMovedMessageSchema,
@@ -20,19 +31,6 @@ import {
 } from "@bb/domain";
 import { z } from "zod";
 import type { Endpoint } from "@bb/hono-typed-routes";
-import type {
-  HostDaemonOnlineRpcCommandType,
-  HostDaemonSettledCommandType,
-} from "./commands.js";
-import {
-  hostDaemonConnectTunnelIdentitySchema,
-  hostDaemonOnlineRpcResultSchemaByType,
-  hostDaemonCommandResultSchemaByType,
-  hostDaemonSettledCommandTypeSchema,
-  hostDaemonRpcCommandSchema,
-  hostDaemonRpcCommandTypeSchema,
-  workspaceContextSchema,
-} from "./commands.js";
 import { hostPlatformSchema } from "./local.js";
 
 const HOST_DAEMON_WEBSOCKET_PROTOCOL = "bb-host-daemon.v1";
@@ -42,6 +40,29 @@ export const hostDaemonActiveThreadSchema = z.object({
 });
 export type HostDaemonActiveThread = z.infer<
   typeof hostDaemonActiveThreadSchema
+>;
+
+export const hostDaemonInteractiveRequestKeySchema = z
+  .object({
+    threadId: z.string().min(1),
+    providerId: z.string().min(1),
+    providerThreadId: z.string().min(1),
+    providerRequestId: z.string().min(1),
+  })
+  .strict();
+export type HostDaemonInteractiveRequestKey = z.infer<
+  typeof hostDaemonInteractiveRequestKeySchema
+>;
+
+export const hostDaemonOpenThreadWorkSchema = z
+  .object({
+    threadId: z.string().min(1),
+    backgroundItemIds: z.array(z.string().min(1)),
+    interactiveRequests: z.array(hostDaemonInteractiveRequestKeySchema),
+  })
+  .strict();
+export type HostDaemonOpenThreadWork = z.infer<
+  typeof hostDaemonOpenThreadWorkSchema
 >;
 
 const hostDaemonLoadedEnvironmentSchema = z.object({
@@ -55,6 +76,7 @@ const hostDaemonWatchSetWorkspaceTargetSchema = z
   .object({
     environmentId: z.string().min(1),
     workspaceContext: workspaceContextSchema,
+    mergeBaseBranch: z.string().min(1).nullable(),
   })
   .strict();
 export type HostDaemonWatchSetWorkspaceTarget = z.infer<
@@ -63,7 +85,6 @@ export type HostDaemonWatchSetWorkspaceTarget = z.infer<
 
 const hostDaemonWatchSetThreadStorageTargetSchema = z
   .object({
-    environmentId: z.string().min(1),
     threadId: z.string().min(1),
   })
   .strict();
@@ -168,6 +189,7 @@ export const hostDaemonSessionOpenRequestSchema = z
     localApiPort: z.number().int().min(1).max(65_535).nullable().default(null),
     protocolVersion: z.number().int().positive(),
     activeThreads: z.array(hostDaemonActiveThreadSchema),
+    openThreadWork: z.array(hostDaemonOpenThreadWorkSchema),
     undeliveredEventThreadIds: z.array(z.string().min(1)).default([]),
     loadedEnvironments: z.array(hostDaemonLoadedEnvironmentSchema).default([]),
   })
@@ -245,6 +267,7 @@ export const hostDaemonSessionOpenResponseSchema = z
       .array(hostDaemonPluginHostGenerationSchema)
       .default([]),
     retiredEnvironmentIds: z.array(z.string().min(1)).default([]),
+    endedInteractiveRequests: z.array(hostDaemonInteractiveRequestKeySchema),
   })
   .strict();
 export type HostDaemonSessionOpenResponse = z.infer<
@@ -361,11 +384,7 @@ export type HostDaemonEventBatchResponse = z.infer<
 
 const hostDaemonEnvironmentChangeSchema = z
   .enum(ENVIRONMENT_CHANGE_KINDS)
-  .extract([
-    "work-status-changed",
-    "git-refs-changed",
-    "thread-storage-changed",
-  ]);
+  .extract(["work-status-changed", "git-refs-changed", "git-branches-changed"]);
 export type HostDaemonEnvironmentChange = z.infer<
   typeof hostDaemonEnvironmentChangeSchema
 >;
@@ -523,9 +542,9 @@ const hostDaemonOnlineRpcResponseSuccessSchema = z.discriminatedUnion(
     onlineRpcResponseSuccessSchemaFor("host.global_skills_status"),
     onlineRpcResponseSuccessSchemaFor("host.list_branch_options"),
     onlineRpcResponseSuccessSchemaFor("host.inspect_git_source"),
+    onlineRpcResponseSuccessSchemaFor("host.inspect_git_checkout"),
     onlineRpcResponseSuccessSchemaFor("host.read_file"),
     onlineRpcResponseSuccessSchemaFor("host.read_file_chunk"),
-    onlineRpcResponseSuccessSchemaFor("host.read_file_relative"),
     onlineRpcResponseSuccessSchemaFor("host.write_file"),
     onlineRpcResponseSuccessSchemaFor("provider.list_models"),
     onlineRpcResponseSuccessSchemaFor("provider.list_commands"),
@@ -534,10 +553,6 @@ const hostDaemonOnlineRpcResponseSuccessSchema = z.discriminatedUnion(
     onlineRpcResponseSuccessSchemaFor("provider.installation.run"),
     onlineRpcResponseSuccessSchemaFor("provider.usage"),
     onlineRpcResponseSuccessSchemaFor("host.discover_repos"),
-    onlineRpcResponseSuccessSchemaFor("workspace.status"),
-    onlineRpcResponseSuccessSchemaFor("workspace.diff"),
-    onlineRpcResponseSuccessSchemaFor("workspace.diffFiles"),
-    onlineRpcResponseSuccessSchemaFor("workspace.diffPatch"),
     onlineRpcResponseSuccessSchemaFor("server_move.inspect"),
     onlineRpcResponseSuccessSchemaFor("server_move.probe"),
     onlineRpcResponseSuccessSchemaFor("server_move.prepare"),
@@ -721,6 +736,13 @@ export const hostDaemonServerWsMessageSchema = z.discriminatedUnion("type", [
       type: z.literal("machine.shutdown"),
     })
     .strict(),
+  z
+    .object({
+      type: z.literal("interactive-requests.end"),
+      requests: z.array(hostDaemonInteractiveRequestKeySchema).min(1),
+      reason: z.string().min(1),
+    })
+    .strict(),
   serverMovedMessageSchema,
   z
     .object({
@@ -768,6 +790,13 @@ const hostDaemonEnvironmentChangeMessageSchema =
       type: z.literal("environment-change"),
     })
     .strict();
+
+const hostDaemonThreadStorageChangeMessageSchema = z
+  .object({
+    type: z.literal("thread-storage-change"),
+    threadId: z.string().min(1),
+  })
+  .strict();
 
 const hostDaemonEnvironmentMetadataChangeMessageSchema =
   hostDaemonEnvironmentMetadataChangePayloadSchema
@@ -885,6 +914,7 @@ export const hostDaemonDaemonWsMessageSchema = z.union([
   hostDaemonMachineShutdownAckMessageSchema,
   hostDaemonHeartbeatMessageSchema,
   hostDaemonEnvironmentChangeMessageSchema,
+  hostDaemonThreadStorageChangeMessageSchema,
   hostDaemonEnvironmentMetadataChangeMessageSchema,
   hostDaemonConnectTunnelIdentityMessageSchema,
   hostDaemonConnectNextStatusMessageSchema,
@@ -973,24 +1003,47 @@ export type HostDaemonInteractiveInterruptResponse = z.infer<
   typeof hostDaemonInteractiveInterruptResponseSchema
 >;
 
-const hostDaemonSkillTreeEntrySchema = z
+const sha256HexSchema = z.string().regex(/^[a-f0-9]{64}$/u);
+const hostDaemonSkillTreeFileSchema = z
   .object({
     path: z.string().min(1),
     mode: z.number().int().min(0).max(0o777),
-    contentBase64: z.string(),
+    sizeBytes: z.number().int().min(0),
+    sha256: sha256HexSchema,
   })
   .strict();
-export const hostDaemonSkillTreeSchema = z
+export type HostDaemonSkillTreeFile = z.infer<
+  typeof hostDaemonSkillTreeFileSchema
+>;
+export const hostDaemonSkillTreeManifestSchema = z
   .object({
-    treeHash: z.string().regex(/^[a-f0-9]{64}$/u),
-    entries: z.array(hostDaemonSkillTreeEntrySchema),
+    treeHash: sha256HexSchema,
+    files: z.array(hostDaemonSkillTreeFileSchema),
   })
   .strict();
-export type HostDaemonSkillTree = z.infer<typeof hostDaemonSkillTreeSchema>;
+export type HostDaemonSkillTreeManifest = z.infer<
+  typeof hostDaemonSkillTreeManifestSchema
+>;
+export const hostDaemonSkillTreeContentRequestSchema = z
+  .object({
+    paths: z.array(z.string().min(1)).min(1),
+  })
+  .strict();
+export type HostDaemonSkillTreeContentRequest = z.infer<
+  typeof hostDaemonSkillTreeContentRequestSchema
+>;
 
 export type HostDaemonInternalSchema = {
   "/skills/tree/:hash": {
-    $get: Endpoint<Record<never, never>, HostDaemonSkillTree, 200>;
+    $get: Endpoint<Record<never, never>, HostDaemonSkillTreeManifest, 200>;
+  };
+  "/skills/tree/:hash/content": {
+    $post: Endpoint<
+      { json: HostDaemonSkillTreeContentRequest },
+      Uint8Array,
+      200,
+      "binary"
+    >;
   };
   "/plugins/:pluginId/host/:digest": {
     $get: Endpoint<Record<never, never>, Uint8Array, 200, "binary">;

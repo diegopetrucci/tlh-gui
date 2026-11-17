@@ -3,10 +3,12 @@ import type {
   ExperimentalFileOpenOptions,
   ExperimentalLiveFileTarget,
 } from "../app-contract.js";
+import { PLUGIN_SLOT_ID_PATTERN } from "./composer-customization-validation.js";
 
 const FILE_PATH_MAX_LENGTH = 32_768;
 const WINDOWS_DRIVE_ABSOLUTE_PATH = /^[A-Za-z]:[\\/]/u;
 const WINDOWS_UNC_ABSOLUTE_PATH = /^\\\\/u;
+const REVISION_REF = /^(?:HEAD|[0-9a-f]{4,40})$/iu;
 
 function isJsonObject(value: unknown): value is Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -61,6 +63,10 @@ function hasUnpairedSurrogate(value: string): boolean {
 
 function isValidPathSegment(segment: string): boolean {
   return segment.length > 0 && segment !== "." && segment !== "..";
+}
+
+function isValidRevisionRef(value: unknown): value is string {
+  return typeof value === "string" && REVISION_REF.test(value);
 }
 
 function isPositiveSafeInteger(value: unknown): value is number {
@@ -118,19 +124,30 @@ export function normalizeExperimentalLiveFileTarget(
   if (!isJsonObject(value) || typeof value.kind !== "string") return null;
 
   switch (value.kind) {
-    case "workspace":
+    case "workspace": {
+      const ref = value.experimental_ref;
       if (
-        !hasExactKeys(value, ["kind", "environmentId", "path"]) ||
+        !hasExactKeys(
+          value,
+          ref === undefined
+            ? ["kind", "environmentId", "path"]
+            : ["kind", "environmentId", "path", "experimental_ref"],
+        ) ||
         !isNonEmptyIdentity(value.environmentId) ||
         !isValidRelativeFilePath(value.path)
       ) {
         return null;
       }
-      return {
+      const target = {
         kind: value.kind,
         environmentId: value.environmentId,
         path: value.path,
       };
+      if (ref === undefined) return target;
+      return isValidRevisionRef(ref)
+        ? { ...target, experimental_ref: ref }
+        : null;
+    }
     case "host":
       if (
         !hasExactKeys(value, ["kind", "hostId", "path"]) ||
@@ -203,4 +220,19 @@ export function normalizeExperimentalFileOpenOptions(
   const location = normalizeExperimentalFileLocation(value.location);
   if (target === null || location === undefined) return null;
   return { target, location };
+}
+
+export function normalizeExperimentalFilePreviewOptions(
+  value: unknown,
+): { options: ExperimentalFileOpenOptions; opener: string | null } | null {
+  if (!isJsonObject(value)) return null;
+  const { opener = null, ...rest } = value;
+  if (
+    opener !== null &&
+    (typeof opener !== "string" || !PLUGIN_SLOT_ID_PATTERN.test(opener))
+  ) {
+    return null;
+  }
+  const options = normalizeExperimentalFileOpenOptions(rest);
+  return options === null ? null : { options, opener };
 }

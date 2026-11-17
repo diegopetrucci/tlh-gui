@@ -18,13 +18,12 @@ import { userExecutableProcessOptions } from "../user-executable-env.js";
 import {
   finalizeListedFiles,
   finalizeListedPaths,
-  listWorkspacePaths,
+  listWorkspacePathCandidates,
 } from "./file-list.js";
 import {
   readFileForTransport,
   readFileChunkForTransport,
   readFileFromGitRef,
-  readRootRelativeFileForTransport,
   type ReadFileContentForTransportResult,
 } from "./file-read.js";
 import { listFilesystemRoots } from "./filesystem-roots.js";
@@ -77,13 +76,15 @@ export async function listHostFiles(
 
     return await finalizeListedFiles({
       filePaths: (
-        await listWorkspacePaths({
+        await listWorkspacePathCandidates({
           root: realRootPath,
           includeHidden: command.includeHidden,
           excludeNames: command.excludeNames,
           respectGitIgnore: command.respectGitIgnore,
           includeFiles: true,
           includeDirectories: false,
+          limit: command.limit,
+          ...(command.query ? { query: command.query } : {}),
         })
       ).map((entry) => entry.path),
       limit: command.limit,
@@ -113,13 +114,15 @@ export async function listHostPaths(
     });
 
     return await finalizeListedPaths({
-      paths: await listWorkspacePaths({
+      paths: await listWorkspacePathCandidates({
         root: realRootPath,
         includeFiles: command.includeFiles,
         includeDirectories: command.includeDirectories,
         includeHidden: command.includeHidden,
         excludeNames: command.excludeNames,
         respectGitIgnore: command.respectGitIgnore,
+        limit: command.limit,
+        ...(command.query ? { query: command.query } : {}),
       }),
       limit: command.limit,
       includeFiles: command.includeFiles,
@@ -247,6 +250,7 @@ export async function readHostFile(
     ...(command.ifNoneMatch !== undefined
       ? { ifNoneMatch: command.ifNoneMatch }
       : {}),
+    followRootSymlink: command.followRootSymlink,
     resolvedPath: command.path,
     resultPath: command.path,
     ...(command.rootPath !== undefined ? { rootPath: command.rootPath } : {}),
@@ -258,23 +262,13 @@ export async function readHostFileChunk(
 ): Promise<HostDaemonOnlineRpcResult<"host.read_file_chunk">> {
   assertAbsoluteHostDiskPathCommand(command);
   return readFileChunkForTransport({
+    followRootSymlink: false,
     resolvedPath: command.path,
     resultPath: command.path,
     rootPath: command.rootPath,
     offset: command.offset,
     length: command.length,
     revision: command.revision,
-  });
-}
-
-export async function readHostRelativeFile(
-  command: CommandOf<"host.read_file_relative">,
-): Promise<HostDaemonOnlineRpcResult<"host.read_file_relative">> {
-  return readRootRelativeFileForTransport({
-    followRootSymlink: command.followRootSymlink,
-    rootPath: command.rootPath,
-    relativePath: command.path,
-    dotfiles: command.dotfiles,
   });
 }
 

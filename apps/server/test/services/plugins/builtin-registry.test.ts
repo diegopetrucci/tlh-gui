@@ -61,6 +61,15 @@ describe("bundled plugin ids", () => {
   });
 });
 
+describe("bundled plugin defaults", () => {
+  it("keeps the GitHub Star plugin bundled but disabled by default", () => {
+    const star = BUNDLED_PLUGINS.find(
+      (plugin) => plugin.pluginId === "bb--github-star",
+    );
+    expect(star?.defaultEnabled).toBe(false);
+  });
+});
+
 describe("bundled plugin artifact resolution", () => {
   let root: string;
 

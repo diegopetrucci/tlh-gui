@@ -1,5 +1,6 @@
 export * from "./spawn.js";
 export * from "./managed-process.js";
+export * from "./oom-score.js";
 export * from "./exec-portable-file.js";
 export * from "./process-group.js";
 export { terminateWindowsProcessTrees } from "./windows-process-tree.js";
@@ -13,3 +14,6 @@ export * from "./socket-type-of-service.js";
 export * from "./process-info.js";
 export * from "./performance-diagnostics.js";
 export * from "./vcs-process-scheduler.js";
+export * from "./host-toolchain.js";
+export * from "./host-process.js";
+export { inheritedNodeNetworkArgs, nodeNetworkArgs } from "./node-network.js";

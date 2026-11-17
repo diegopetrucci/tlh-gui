@@ -29,10 +29,12 @@ import { resolveProviderPlanCommand } from "../../src/services/providers/provide
 import type { ProviderRegistryService } from "../../src/services/providers/provider-registry.js";
 import { clearStoredEventDecodeCache } from "../../src/services/threads/stored-event-decode-cache.js";
 import { clearTimelineSelectionMemo } from "../../src/services/threads/timeline-selection-memo.js";
+import { clearTimelineProjectionFolds } from "../../src/services/threads/timeline-projection-fold.js";
 import {
   DEFAULT_MAX_INLINE_OUTPUT_CHARS,
   shortenTimelineResponseOutputs,
 } from "../../src/services/threads/timeline-output-shortening.js";
+import { timelineWindowTag } from "../../src/services/threads/timeline-window-tag.js";
 
 export const SNAPSHOT_MODE_ENV = "BB_PROVIDER_CORPUS_SNAPSHOT";
 
@@ -152,6 +154,7 @@ export interface BuiltTimelinePage {
 export interface BuildRouteTimelinePageArgs {
   db: DbConnection;
   eventBudget?: number;
+  extensionStateKinds?: readonly string[];
   includeDiagnosticOperations?: boolean;
   maxSeq?: number;
   page: ThreadTimelinePageRequest;
@@ -171,6 +174,7 @@ export function buildRouteTimelinePage(
       completedTurnDisplay: "collapse",
       eventBudget:
         args.eventBudget ?? defaultFeatureFlags.timelineWindowEventBudget,
+      extensionStateKinds: args.extensionStateKinds ?? [],
       includeClearedContextHistory: false,
       includeDiagnosticOperations: args.includeDiagnosticOperations ?? true,
       compactionOfferEnabled: false,
@@ -190,18 +194,17 @@ export function buildRouteTimelinePage(
       summaryOnly: false,
     },
   );
-  return {
-    profile,
-    response: shortenTimelineResponseOutputs(response, {
-      maxInlineOutputChars: DEFAULT_MAX_INLINE_OUTPUT_CHARS,
-      preview: !includeNestedRows,
-    }),
-  };
+  const window = shortenTimelineResponseOutputs(response, {
+    maxInlineOutputChars: DEFAULT_MAX_INLINE_OUTPUT_CHARS,
+    preview: !includeNestedRows,
+  });
+  return { profile, response: { ...window, tag: timelineWindowTag(window) } };
 }
 
 export function clearCrossBuildTimelineCaches(db: DbConnection): void {
   clearStoredEventDecodeCache(db);
   clearTimelineSelectionMemo(db);
+  clearTimelineProjectionFolds(db);
 }
 
 export function selectionWasReused(

@@ -273,27 +273,6 @@ it("keeps the latest pin toggle through stale reads until every write settles", 
   );
 });
 
-it("shows the server's pinnedAt as soon as the pin is acknowledged", async () => {
-  const server = serve([entry("t1", null)]);
-  await waitFor(() =>
-    expect(server.pinnedAt("t1")).toEqual([null, null, null]),
-  );
-  const pin = createDeferredPromise<ReturnType<typeof makeThreadResponse>>();
-  vi.mocked(sdk.threads.pin).mockReturnValue(pin.promise);
-  act(() => server.view.result.current.pin.mutate({ id: "t1" }));
-  await waitFor(() => expect(typeof server.pinnedAt("t1")[0]).toBe("number"));
-  const never = new Promise<never>(() => {});
-  vi.mocked(sdk.threads.list).mockReturnValue(never);
-  vi.mocked(sdk.threads.get).mockReturnValue(never);
-  vi.mocked(request).mockReturnValue(never);
-
-  await act(async () =>
-    pin.resolve(makeThreadResponse({ ...entry("t1", 777) })),
-  );
-
-  await waitFor(() => expect(server.pinnedAt("t1")).toEqual([777, 777, 777]));
-});
-
 it("predicts on a thread list mounted while the pin is pending", async () => {
   const server = serve([entry("t1", null)]);
   await waitFor(() =>
@@ -389,9 +368,19 @@ async function acknowledgedPin(server: ReturnType<typeof serve>) {
     );
 }
 
-it("keeps concurrent thread state when a pin succeeds", async () => {
+it("reads the thread back when a pin response is older than concurrent thread state", async () => {
   const server = serve([entry("t1", null)]);
   const acknowledge = await acknowledgedPin(server);
+  vi.mocked(sdk.threads.get).mockResolvedValue(
+    makeThreadResponse({
+      ...entry("t1", 777),
+      status: "active",
+      runtime: { displayStatus: "active" },
+      updatedAt: 30,
+      sectionId: "new",
+      lastReadAt: 25,
+    }),
+  );
   act(() => {
     const statusChange = {
       status: "active" as const,

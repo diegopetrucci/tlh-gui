@@ -4,8 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { AgentRuntime, AgentRuntimeOptions } from "@bb/agent-runtime";
-import type { ThreadEvent } from "@bb/domain";
-import { threadScope, turnScope } from "@bb/domain";
+import { type ThreadEvent, threadScope, turnScope } from "@bb/domain";
 import type { HostDaemonInjectedSkillSource } from "@bb/host-daemon-contract";
 import type { HostWatcher } from "@bb/host-watcher";
 import {
@@ -13,13 +12,7 @@ import {
   type HostWorkspace,
   type ProvisionWorkspaceArgs,
 } from "@bb/host-workspace";
-import {
-  createDeferredPromise,
-  initRepo,
-  makeTempDir,
-  makeWorkspaceMergeBase,
-  makeWorkspaceStatus,
-} from "@bb/test-helpers";
+import { createDeferredPromise, initRepo, makeTempDir } from "@bb/test-helpers";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   RuntimeManager,
@@ -28,14 +21,10 @@ import {
 import { createRuntimeShellEnvCache } from "./runtime-shell-env-cache.js";
 
 type GetCurrentBranchArgs = Parameters<HostWorkspace["getCurrentBranch"]>;
-type GetStatusResult = Awaited<ReturnType<HostWorkspace["getStatus"]>>;
-type GetDiffResult = Awaited<ReturnType<HostWorkspace["getDiff"]>>;
 type GetLocalStateFingerprintResult = Awaited<
   ReturnType<HostWorkspace["getLocalStateSnapshot"]>
 >["fingerprint"];
-type GetSharedGitRefsFingerprintResult = Awaited<
-  ReturnType<HostWorkspace["getSharedGitRefsSnapshot"]>
->["fingerprint"];
+type GetSharedGitRefsFingerprintResult = string;
 type CommitArgs = Parameters<HostWorkspace["commit"]>;
 type ProvisionWorkspaceMockArgs = Parameters<
   (options: ProvisionWorkspaceArgs) => Promise<HostWorkspace>
@@ -63,10 +52,7 @@ interface RuntimeOptionsRef {
 }
 
 interface RuntimeManagerProviderMaintenanceInternals {
-  createProviderMaintenanceRuntime: (args: {
-    dataDir: string;
-  }) => Promise<AgentRuntime>;
-  providerMaintenanceRuntime: AgentRuntime | null;
+  createProviderMaintenanceRuntime: () => Promise<AgentRuntime>;
 }
 
 const execFileAsync = promisify(execFile);
@@ -117,16 +103,6 @@ function getProvisionWorkspacePath(args: ProvisionWorkspaceArgs): string {
 }
 
 function createFakeWorkspace(path: string, isGitRepo = true) {
-  const status: GetStatusResult = makeWorkspaceStatus({
-    mergeBase: makeWorkspaceMergeBase(),
-  });
-  const diff: GetDiffResult = {
-    diff: "",
-    truncated: false,
-    shortstat: "",
-    files: "",
-    mergeBaseRef: null,
-  };
   let localStateFingerprint: GetLocalStateFingerprintResult = `local:${path}:initial`;
   let localStateFingerprintError: Error | null = null;
   let sharedGitRefsFingerprint: GetSharedGitRefsFingerprintResult = `refs:${path}:initial`;
@@ -135,6 +111,7 @@ function createFakeWorkspace(path: string, isGitRepo = true) {
     path,
     isGitRepo,
     isWorktree: false,
+    gitCommonDir: isGitRepo ? `${path}/.git` : null,
     getDefaultBranch: vi.fn(async () => "main"),
     getCurrentBranch: vi.fn(async (..._args: GetCurrentBranchArgs) => "main"),
     getHeadSha: vi.fn(async () => "commit-1"),
@@ -148,18 +125,13 @@ function createFakeWorkspace(path: string, isGitRepo = true) {
       if (sharedGitRefsFingerprintError) {
         throw sharedGitRefsFingerprintError;
       }
-      return { fingerprint: sharedGitRefsFingerprint, defaultBranch: "main" };
+      return {
+        defaultBranch: "main",
+        branchNamesFingerprint: "names-1",
+        fingerprintFor: () => sharedGitRefsFingerprint,
+      };
     }),
     getAdditionalWorkspaceWriteRoots: vi.fn(async () => []),
-    getStatus: vi.fn(async () => status),
-    getDiff: vi.fn(async () => diff),
-    diffFiles: vi.fn(async () => ({
-      files: [],
-      shortstat: "",
-      mergeBaseRef: null,
-      truncated: false,
-    })),
-    diffPatch: vi.fn(async () => []),
     commit: vi.fn(async (..._args: CommitArgs) => ({
       commitSha: "commit-1",
       commitSubject: "commit",
@@ -211,7 +183,9 @@ function createFakeRuntime() {
     resumeThread: vi.fn(async (_args: ResumeThreadArgs) => ({
       providerThreadId: "provider-1",
     })),
-    runTurn: vi.fn(async (_args: RunTurnArgs) => undefined),
+    runTurn: vi.fn(async (_args: RunTurnArgs) => ({
+      status: "started" as const,
+    })),
     steerTurn: vi.fn(async (_args: SteerTurnArgs) => ({
       status: "steered" as const,
     })),
@@ -251,6 +225,7 @@ function createFakeRuntime() {
       ]),
     ],
     hasOpenBackgroundWork: () => openBackgroundWork,
+    listOpenBackgroundWork: () => [],
     shutdown: vi.fn(async () => undefined),
     endActiveTurn: (threadId) => {
       activeTurnsByThreadId.delete(threadId);
@@ -1189,6 +1164,104 @@ describe("RuntimeManager", () => {
     }
   });
 
+  it("retires a busy provider maintenance runtime after its requests finish when the shell env changes", async () => {
+    const dataDir = await makeTempDir("bb-provider-maintenance-retire-");
+    const firstRuntime = createFakeRuntime();
+    const secondRuntime = createFakeRuntime();
+    const createRuntime = vi
+      .fn()
+      .mockReturnValueOnce(firstRuntime)
+      .mockReturnValueOnce(secondRuntime);
+    const manager = new RuntimeManager({
+      createRuntime,
+      shellEnv: { PATH: "/old/bin:/usr/bin" },
+    });
+    const usage = createDeferredPromise<string>();
+    const usageStarted = createDeferredPromise<AgentRuntime>();
+
+    const usageRequest = manager.withProviderMaintenanceRuntime(
+      { dataDir },
+      async (runtime) => {
+        usageStarted.resolve(runtime);
+        return usage.promise;
+      },
+    );
+    await expect(usageStarted.promise).resolves.toBe(firstRuntime);
+
+    await manager.replaceBaseShellEnv({ PATH: "/new/bin:/usr/bin" });
+    expect(firstRuntime.shutdown).not.toHaveBeenCalled();
+    await expect(
+      manager.withProviderMaintenanceRuntime({ dataDir }, async (runtime) =>
+        runtime === secondRuntime ? "fresh" : "stale",
+      ),
+    ).resolves.toBe("fresh");
+
+    usage.resolve("usage");
+    await expect(usageRequest).resolves.toBe("usage");
+    await vi.waitFor(() => {
+      expect(firstRuntime.shutdown).toHaveBeenCalledOnce();
+    });
+    expect(secondRuntime.shutdown).not.toHaveBeenCalled();
+
+    await manager.shutdownAll();
+    expect(secondRuntime.shutdown).toHaveBeenCalledOnce();
+  });
+
+  it("shuts down a busy retired provider maintenance runtime when the manager shuts down", async () => {
+    const dataDir = await makeTempDir("bb-provider-maintenance-shutdown-");
+    const runtime = createFakeRuntime();
+    const manager = new RuntimeManager({
+      createRuntime: () => runtime,
+      shellEnv: { PATH: "/old/bin:/usr/bin" },
+    });
+    const requestStarted = createDeferredPromise<void>();
+    const request = createDeferredPromise<void>();
+
+    const activeRequest = manager.withProviderMaintenanceRuntime(
+      { dataDir },
+      async () => {
+        requestStarted.resolve();
+        return request.promise;
+      },
+    );
+    await requestStarted.promise;
+    await manager.replaceBaseShellEnv({ PATH: "/new/bin:/usr/bin" });
+    await manager.shutdownAll();
+
+    expect(runtime.shutdown).toHaveBeenCalledOnce();
+    request.resolve();
+    await activeRequest;
+    expect(runtime.shutdown).toHaveBeenCalledOnce();
+  });
+
+  it("keeps runtimes when only fnm multishell PATH entries change", async () => {
+    const dataDir = await makeTempDir("bb-provider-maintenance-fnm-");
+    const runtime = createFakeRuntime();
+    const createRuntime = vi.fn(() => runtime);
+    const manager = new RuntimeManager({
+      createRuntime,
+      shellEnv: {
+        PATH: "/Users/me/Library/Caches/fnm_multishells/123_1/bin:/usr/bin",
+      },
+    });
+
+    await manager.ensureProviderMaintenanceRuntime({ dataDir });
+    await manager.replaceBaseShellEnv({
+      PATH: "/Users/me/Library/Caches/fnm_multishells/456_2/bin:/usr/bin",
+    });
+
+    expect(runtime.shutdown).not.toHaveBeenCalled();
+    await expect(
+      manager.ensureProviderMaintenanceRuntime({ dataDir }),
+    ).resolves.toBe(runtime);
+    expect(createRuntime).toHaveBeenCalledOnce();
+
+    await manager.replaceBaseShellEnv({
+      PATH: "/Users/me/Library/Caches/fnm_multishells/789_3/bin:/opt/bin",
+    });
+    expect(runtime.shutdown).toHaveBeenCalledOnce();
+  });
+
   it("does not let stale provider maintenance creation replace a newer runtime", async () => {
     const dataDir = await makeTempDir("bb-provider-maintenance-race-");
     const staleRuntime = createFakeRuntime();
@@ -1216,13 +1289,14 @@ describe("RuntimeManager", () => {
     });
 
     await expect(currentRuntimePromise).resolves.toBe(currentRuntime);
-    expect(managerInternals.providerMaintenanceRuntime).toBe(currentRuntime);
 
     staleCreation.resolve(staleRuntime);
     await expect(staleRuntimePromise).resolves.toBe(staleRuntime);
     await replaceShellEnvPromise;
 
-    expect(managerInternals.providerMaintenanceRuntime).toBe(currentRuntime);
+    await expect(
+      manager.ensureProviderMaintenanceRuntime({ dataDir }),
+    ).resolves.toBe(currentRuntime);
     expect(staleRuntime.shutdown).toHaveBeenCalledTimes(1);
     expect(currentRuntime.shutdown).not.toHaveBeenCalled();
   });
@@ -1520,7 +1594,7 @@ describe("RuntimeManager", () => {
       provisionWorkspace,
       createRuntime: () => runtime,
       shellEnv: {
-        PATH: "/tmp/fnm_multishells/first/bin:/usr/bin",
+        PATH: "/tmp/first/bin:/usr/bin",
       },
     });
 
@@ -1531,7 +1605,7 @@ describe("RuntimeManager", () => {
     runtime.setPendingTurnStart("thread-1", true);
 
     await manager.replaceBaseShellEnv({
-      PATH: "/tmp/fnm_multishells/second/bin:/usr/bin",
+      PATH: "/tmp/second/bin:/usr/bin",
     });
 
     expect(manager.get("env-1")?.runtime).toBe(runtime);
@@ -1539,7 +1613,7 @@ describe("RuntimeManager", () => {
 
     runtime.setPendingTurnStart("thread-1", false);
     await manager.replaceBaseShellEnv({
-      PATH: "/tmp/fnm_multishells/third/bin:/usr/bin",
+      PATH: "/tmp/third/bin:/usr/bin",
     });
 
     expect(manager.get("env-1")).toBeUndefined();
@@ -1674,7 +1748,7 @@ describe("RuntimeManager", () => {
   it("does not start a workspace watcher when loading an environment", async () => {
     const hostWatcher = {
       watchWorkspace: vi.fn(() => () => undefined),
-      watchThreadStorageRoot: vi.fn(() => () => undefined),
+      watchThreadStorage: vi.fn(() => () => undefined),
     } satisfies HostWatcher;
     const manager = new RuntimeManager({
       hostWatcher,
@@ -1688,7 +1762,7 @@ describe("RuntimeManager", () => {
     });
 
     expect(hostWatcher.watchWorkspace).not.toHaveBeenCalled();
-    expect(hostWatcher.watchThreadStorageRoot).not.toHaveBeenCalled();
+    expect(hostWatcher.watchThreadStorage).not.toHaveBeenCalled();
   });
 
   it("lists live threads for session reconciliation before the first turn event", async () => {

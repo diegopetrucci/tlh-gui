@@ -524,6 +524,7 @@ describe("tlhInstallationRun", () => {
     };
     const result = await tlhInstallationRun(status, "update");
     expect(result.command).toMatchObject({ command: "tlh", args: ["update"] });
+    expect(result.command.args).not.toContain("--self");
     expect(result.verification).toMatchObject({
       kind: "version_at_least",
       version: "0.11.0",
@@ -589,6 +590,7 @@ describe("tlhInstallerCommand and tlhUpdateCommand shapes", () => {
     mockState.command = "tlh";
     const cmd = tlhUpdateCommand();
     expect(cmd).toMatchObject({ command: "tlh", args: ["update"] });
+    expect(cmd.args).not.toContain("--self");
     expect(cmd.displayCommand).toContain("tlh");
     expect(cmd.displayCommand).toContain("update");
   });

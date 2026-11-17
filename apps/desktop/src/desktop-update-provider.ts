@@ -6,6 +6,7 @@ import {
 type DesktopReleaseChannel = "latest" | "nightly";
 
 interface DesktopReleaseInfo {
+  appId: "com.thelastharness.gui" | "com.thelastharness.gui.nightly";
   applicationName: "tlh gui" | "tlh gui Nightly";
   channel: DesktopReleaseChannel;
   iconFileName: "icon.png" | "icon-nightly.png";
@@ -20,6 +21,9 @@ export function createDesktopReleaseInfo(
   const releaseTag = nightly ? "desktop-nightly" : "desktop-latest";
 
   return {
+    appId: nightly
+      ? "com.thelastharness.gui.nightly"
+      : "com.thelastharness.gui",
     applicationName: nightly ? "tlh gui Nightly" : "tlh gui",
     channel,
     iconFileName: nightly ? "icon-nightly.png" : "icon.png",

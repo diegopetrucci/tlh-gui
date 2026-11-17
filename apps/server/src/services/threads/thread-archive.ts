@@ -10,6 +10,7 @@ import {
   listLiveThreadsInEnvironment,
   listLifecycleThreadDependents,
   archiveThread,
+  deleteThreadScopedPruningCursors,
   getEnvironment,
   listNonDeletedChildThreads,
   listNonDeletedHiddenSourceThreads,
@@ -91,6 +92,7 @@ function archiveThreadWithLifecycleEffects(
     mode: "archived",
     threadId: archivedThread.id,
   });
+  deleteThreadScopedPruningCursors(deps.db, archivedThread.id);
   void cancelProviderEnvironmentCreation(deps, archivedThread.id).catch(
     (error) =>
       deps.logger.warn({ error }, "Environment launch cancellation failed"),
@@ -188,17 +190,26 @@ function archiveThreadTrees(
   return archivedThreadIds;
 }
 
+export function listArchiveCascadeThreadIds(
+  db: AppDeps["db"],
+  thread: Thread,
+): string[] {
+  return listArchiveCandidates(db, [thread])
+    .filter(
+      (candidate) =>
+        candidate.id !== thread.id &&
+        candidate.visibility === "visible" &&
+        candidate.deletedAt === null &&
+        candidate.archivedAt === null,
+    )
+    .map((candidate) => candidate.id);
+}
+
 export function countUnarchivedThreadDescendants(
   db: AppDeps["db"],
   thread: Thread,
 ): number {
-  return listArchiveCandidates(db, [thread]).filter(
-    (candidate) =>
-      candidate.id !== thread.id &&
-      candidate.visibility === "visible" &&
-      candidate.deletedAt === null &&
-      candidate.archivedAt === null,
-  ).length;
+  return listArchiveCascadeThreadIds(db, thread).length;
 }
 
 function listArchiveCandidates(db: AppDeps["db"], roots: Thread[]) {

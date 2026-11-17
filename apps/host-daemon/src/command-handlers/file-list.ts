@@ -2,13 +2,16 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { setImmediate as yieldToEventLoop } from "node:timers/promises";
 import { fuzzyMatchPaths } from "@bb/fuzzy-match";
-import { detectGitRepo, runGit } from "@bb/host-workspace";
 import type {
   HostPathEntry,
   HostPathEntryKind,
 } from "@bb/host-daemon-contract";
 import { ExpectedCommandDispatchError } from "../command-dispatch-support.js";
 import { runInSerialLane } from "../serial-lane.js";
+import {
+  detectGitRepo,
+  runGit,
+} from "bb-environment-provider-host/workspace-git";
 
 interface FinalizeListedFilesArgs {
   filePaths: string[];
@@ -56,6 +59,8 @@ interface ListPathsRecursivelyArgs extends PathListInclusion {
   includeHidden: boolean;
   excludeNames: ReadonlySet<string>;
   ignoredPaths: ReadonlySet<string>;
+  maxPaths: number;
+  results: ListedPath[];
 }
 
 interface ListWorkspacePathsArgs extends PathListInclusion {
@@ -63,6 +68,11 @@ interface ListWorkspacePathsArgs extends PathListInclusion {
   includeHidden: boolean;
   excludeNames: readonly string[];
   respectGitIgnore: boolean;
+}
+
+interface ListWorkspacePathCandidatesArgs extends ListWorkspacePathsArgs {
+  limit: number;
+  query?: string;
 }
 
 interface CachedListing {
@@ -80,6 +90,13 @@ const CACHED_LISTING_MAX_AGE_MS = 30_000;
 const RANKING_CHUNK_SIZE = 10_000;
 const CHUNKED_RANKING_LANE = "chunked-ranking";
 const chunkedRankingLanes = new Map<string, Promise<void>>();
+
+export function listWorkspacePathCandidates(
+  args: ListWorkspacePathCandidatesArgs,
+): Promise<ListedPath[]> {
+  if (args.query) return listWorkspacePaths(args);
+  return discoverWorkspacePaths(args, args.limit + 1);
+}
 
 export function listWorkspacePaths(
   args: ListWorkspacePathsArgs,
@@ -114,7 +131,7 @@ function refreshWorkspacePaths(
   const existing = pendingListings.get(key);
   if (existing) return existing;
   const startedAt = Date.now();
-  const listing = discoverWorkspacePaths(args)
+  const listing = discoverWorkspacePaths(args, Number.POSITIVE_INFINITY)
     .then(
       (paths) => {
         const completedAt = Date.now();
@@ -148,6 +165,7 @@ function cacheListing(key: string, listing: CachedListing): void {
 
 async function discoverWorkspacePaths(
   args: ListWorkspacePathsArgs,
+  maxPaths: number,
 ): Promise<ListedPath[]> {
   const ignoredPaths = new Set<string>();
   if (
@@ -169,7 +187,8 @@ async function discoverWorkspacePaths(
       if (entry.length > 0) ignoredPaths.add(entry.replace(/\/$/, ""));
     }
   }
-  return listPathsRecursively({
+  const results: ListedPath[] = [];
+  await listPathsRecursively({
     dir: args.root,
     root: args.root,
     includeHidden: args.includeHidden,
@@ -177,7 +196,10 @@ async function discoverWorkspacePaths(
     ignoredPaths,
     includeFiles: args.includeFiles,
     includeDirectories: args.includeDirectories,
+    maxPaths,
+    results,
   });
+  return results;
 }
 
 const ALWAYS_EXCLUDED_NAMES: ReadonlySet<string> = new Set([".git"]);
@@ -327,10 +349,12 @@ export async function finalizeListedPaths(
 
 async function listPathsRecursively(
   args: ListPathsRecursivelyArgs,
-): Promise<ListedPath[]> {
+): Promise<void> {
+  if (args.results.length >= args.maxPaths) return;
   const entries = await fs.readdir(args.dir, { withFileTypes: true });
-  const results: ListedPath[] = [];
+  const results = args.results;
   for (const entry of entries) {
+    if (results.length >= args.maxPaths) return;
     if (ALWAYS_EXCLUDED_NAMES.has(entry.name)) continue;
     if (args.excludeNames.has(entry.name)) continue;
     if (!args.includeHidden && entry.name.startsWith(".")) continue;
@@ -353,11 +377,10 @@ async function listPathsRecursively(
           name: entry.name,
         });
       }
-      const childResults = await listPathsRecursively({
+      await listPathsRecursively({
         ...args,
         dir: fullPath,
       });
-      for (const childResult of childResults) results.push(childResult);
       continue;
     }
 
@@ -369,5 +392,4 @@ async function listPathsRecursively(
       });
     }
   }
-  return results;
 }

@@ -1383,6 +1383,75 @@ describe("editThreadMessage", () => {
     });
   });
 
+  it("rejects a TLH run that appears while the rewind is being prepared, in the final transaction", async () => {
+    await withTestHarness(async (harness) => {
+      const { environment, thread } = seedEditableThread(harness, {
+        providerId: "pi",
+      });
+      const maxSequence = Math.max(
+        ...listEvents(harness.db, { threadId: thread.id }).map(
+          (event) => event.sequence,
+        ),
+      );
+      const editing = editThreadMessage(harness.deps, {
+        environment,
+        thread,
+        payload: {
+          operationId: "edit-tlh-final-race",
+          expectedRequestSequence: 7,
+          input: [{ type: "text", text: "Replacement", mentions: [] }],
+        },
+      });
+      const rewind = await waitForQueuedCommand(
+        harness,
+        (queued) => queued.command.type === "thread.rewind.prepare",
+      );
+      const item = {
+        id: "pi:detached:run-during-prepare:g1",
+        type: "backgroundTask" as const,
+        familyId: "pi:detached:run-during-prepare",
+        taskType: "local_subagent",
+        description: "TLH detached subagent run",
+        status: "pending" as const,
+        taskStatus: "running" as const,
+        skipTranscript: false,
+        foreground: false,
+      };
+      seedStoredEvent(harness.deps, {
+        threadId: thread.id,
+        environmentId: environment.id,
+        sequence: maxSequence + 1,
+        type: "item/started",
+        scope: turnScope("turn-last"),
+        providerThreadId: "provider-original",
+        itemId: item.id,
+        itemKind: "backgroundTask",
+        data: { providerThreadId: "provider-original", item },
+      });
+      const rejected = expect(editing).rejects.toThrow(
+        "Cannot edit a message while a TLH detached run is active",
+      );
+      await reportQueuedCommandSuccess(harness, rewind, {
+        providerThreadId: "provider-staged-final-race",
+      });
+      const discard = await waitForQueuedCommand(
+        harness,
+        (queued) => queued.command.type === "thread.rewind.discard",
+      );
+      await reportQueuedCommandSuccess(harness, discard, {});
+
+      await rejected;
+      expect(
+        listEvents(harness.db, { threadId: thread.id }).some(
+          (event) =>
+            event.sequence > maxSequence &&
+            (event.type === "client/turn/requested" ||
+              event.type === "system/operation"),
+        ),
+      ).toBe(false);
+    });
+  });
+
   it("rejects a TLH run that the edit's first stop settles as tracking lost", async () => {
     await withTestHarness(async (harness) => {
       const { environment, thread } = seedEditableThread(harness, {

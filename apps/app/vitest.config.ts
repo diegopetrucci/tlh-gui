@@ -2,14 +2,30 @@ import path from "path";
 import {
   defineWorkspaceTestConfig,
   sharedWorkerProjects,
+  SharedWorkerSequencer,
 } from "../../vitest.shared.js";
+import type { TestSpecification } from "vitest/node";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { forkablePluginPaths } from "./vite-forkable-plugin-paths.js";
 import { sharedUiEnvSeam } from "./vite-shared-ui-seam.js";
+import { pluginZodRuntime } from "./vite-plugin-zod-runtime.js";
+
+class AppTestSequencer extends SharedWorkerSequencer {
+  override async sort(
+    files: TestSpecification[],
+  ): Promise<TestSpecification[]> {
+    const sorted = await super.sort(files);
+    return sorted.sort(
+      (a, b) =>
+        Number(a.project.config.isolate) - Number(b.project.config.isolate),
+    );
+  }
+}
 
 export default defineWorkspaceTestConfig({
   plugins: [
+    pluginZodRuntime(),
     forkablePluginPaths(path.resolve(__dirname, "./src")),
     sharedUiEnvSeam(),
     react(),
@@ -22,6 +38,7 @@ export default defineWorkspaceTestConfig({
   },
   test: {
     silent: "passed-only",
+    sequence: { sequencer: AppTestSequencer },
     environment: "node",
     setupFiles: ["src/test/setup.ts"],
     testTimeout: 15_000,

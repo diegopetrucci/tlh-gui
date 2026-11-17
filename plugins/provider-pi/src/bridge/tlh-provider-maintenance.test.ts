@@ -40,9 +40,16 @@ vi.mock("@get-bb/plugin-sdk/provider-bridge", async (importOriginal) => {
   };
 });
 
+vi.mock("@get-bb/plugin-sdk/process", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@get-bb/plugin-sdk/process")>()),
+  experimental_execHostFile: vi.fn(async () => ({
+    stdout: "0.84.0\n",
+    stderr: "",
+  })),
+}));
+
 vi.mock("./rpc-child.js", () => ({
   resolvePiLaunch: () => ({ command: mockState.command, args: [] }),
-  resolvePiProcessLaunch: () => ({ command: mockState.command, args: [] }),
 }));
 
 import { PI_BRIDGE_OPTIONS_BY_FLAVOR } from "../bridge-options.js";
@@ -72,9 +79,10 @@ describe("non-tlh command keeps upstream npm behavior", () => {
 
   it("produces an npm update command when command is pi", async () => {
     mockState.command = "pi";
-    mockState.executablePath = "/usr/local/bin/pi";
+    mockState.executablePath = path.join(path.sep, "npm", "bin", "pi");
     const status = await getPiProviderInstallationStatus(true);
     expect(status.installAction?.command).toContain("npm");
+    expect(status.installAction?.command).not.toContain("--self");
     const run = await getPiProviderInstallationRun("update");
     expect(run).toMatchObject({
       available: true,

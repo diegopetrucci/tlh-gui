@@ -1,6 +1,6 @@
 export const BB_PI_EXTENSION_SOURCE = String.raw`
-import { readFileSync, renameSync, writeSync } from "node:fs";
-import { Socket } from "node:net";
+import { readFileSync, renameSync } from "node:fs";
+import { connect } from "node:net";
 import { StringDecoder } from "node:string_decoder";
 import * as PiRuntime from "@earendil-works/pi-coding-agent";
 const { SessionManager } = PiRuntime;
@@ -11,25 +11,36 @@ function supportsAgentSettlement(version) {
 }
 import { Type } from "typebox";
 
-const CHILD_TO_BRIDGE_FD = 3;
-const BRIDGE_TO_CHILD_FD = 4;
+const BRIDGE_CHANNEL_ENV = "BB_PI_BRIDGE_CHANNEL";
+const BRIDGE_CHANNEL_TOKEN_ENV = "BB_PI_BRIDGE_CHANNEL_TOKEN";
+const BRIDGE_CHANNEL = Symbol.for("bb.pi.bridgeChannel");
 
-function writeLine(fd, message) {
-  const line = JSON.stringify(message) + "\n";
-  try {
-    // Synchronous: tool results and fork replies must never interleave.
-    writeSyncAll(fd, line);
-  } catch {
-    // The bridge is gone; nothing to report to.
+function openBridgeChannel() {
+  const address = process.env[BRIDGE_CHANNEL_ENV];
+  const token = process.env[BRIDGE_CHANNEL_TOKEN_ENV];
+  delete process.env[BRIDGE_CHANNEL_ENV];
+  delete process.env[BRIDGE_CHANNEL_TOKEN_ENV];
+  if (!address || !token) {
+    return Promise.reject(new Error("bb did not provide its Pi bridge channel"));
   }
+  return new Promise((resolve, reject) => {
+    const socket = connect(address);
+    const channel = { socket, onLine: () => undefined };
+    socket.once("error", reject);
+    socket.once("connect", () => {
+      socket.off("error", reject);
+      socket.on("error", () => undefined);
+      socket.unref();
+      socket.write(token + "\n");
+      readLines(socket, (line) => channel.onLine(line));
+      resolve(channel);
+    });
+  });
 }
 
-function writeSyncAll(fd, text) {
-  const buffer = Buffer.from(text, "utf8");
-  let offset = 0;
-  while (offset < buffer.length) {
-    offset += writeSync(fd, buffer, offset, buffer.length - offset);
-  }
+function bridgeChannel() {
+  globalThis[BRIDGE_CHANNEL] ??= openBridgeChannel();
+  return globalThis[BRIDGE_CHANNEL];
 }
 
 /** Newline-only line reader (never readline: it splits on U+2028/U+2029). */
@@ -171,7 +182,11 @@ function buildParameters(inputSchema) {
 
 // ---- the extension ----
 
-export default function bbExtension(pi) {
+export default async function bbExtension(pi) {
+  const channel = await bridgeChannel();
+  const writeLine = (message) => {
+    if (channel.socket.writable) channel.socket.write(JSON.stringify(message) + "\n");
+  };
   const toolsFile = process.env.PI_BB_TOOLS_FILE;
   const tools = toolsFile ? JSON.parse(readFileSync(toolsFile, "utf8")) : [];
   const pendingToolCalls = new Map();
@@ -195,7 +210,7 @@ export default function bbExtension(pi) {
     if (!isRecord(value) || !Array.isArray(value.activeAsyncJobIds)) return;
     const activeAsyncJobIds = value.activeAsyncJobIds.map(nonEmptyString);
     if (activeAsyncJobIds.some((id) => id === null)) return;
-    writeLine(CHILD_TO_BRIDGE_FD, {
+    writeLine({
       kind: "tlh:effective-activity",
       activeAsyncJobIds,
     });
@@ -207,7 +222,7 @@ export default function bbExtension(pi) {
     const runId = nonEmptyString(value.runId);
     const id = runId === null ? nonEmptyString(value.id) : null;
     if (state === null || (runId === null && id === null)) return;
-    writeLine(CHILD_TO_BRIDGE_FD, {
+    writeLine({
       kind: "subagent:async-complete",
       ...(runId === null ? { id } : { runId }),
       state,
@@ -273,48 +288,14 @@ export default function bbExtension(pi) {
       void handleBridgeRequest(message);
     }
   };
-  if (typeof Bun !== "undefined") {
-    // pi ships as a Bun-compiled binary, and Bun's net.Socket cannot attach
-    // to a borrowed stdio fd (the handle stays null and nothing is ever
-    // read), so the bridge channel is read through Bun's file stream instead.
-    void (async () => {
-      const decoder = new StringDecoder("utf8");
-      let pending = "";
-      try {
-        for await (const chunk of Bun.file(BRIDGE_TO_CHILD_FD).stream()) {
-          const text = typeof chunk === "string" ? chunk : decoder.write(chunk);
-          let start = 0;
-          for (;;) {
-            const index = text.indexOf("\n", start);
-            if (index === -1) {
-              pending += text.slice(start);
-              break;
-            }
-            const line = pending + text.slice(start, index);
-            pending = "";
-            start = index + 1;
-            onBridgeLine(line.endsWith("\r") ? line.slice(0, -1) : line);
-          }
-        }
-      } catch {
-        // The bridge is gone; nothing to report to.
-      }
-    })();
-  } else {
-    // Non-blocking: libuv polls the pipe, so pi's process.exit is never held
-    // up by an outstanding read; EOF (the bridge ended its writer) closes it.
-    const bridgeIn = new Socket({ fd: BRIDGE_TO_CHILD_FD, readable: true, writable: false });
-    bridgeIn.on("error", () => undefined);
-    bridgeIn.unref();
-    readLines(bridgeIn, onBridgeLine);
-  }
+  channel.onLine = onBridgeLine;
 
   async function handleBridgeRequest(message) {
     try {
       const result = await runBridgeRequest(message);
-      writeLine(CHILD_TO_BRIDGE_FD, { kind: "reply", id: message.id, result });
+      writeLine({ kind: "reply", id: message.id, result });
     } catch (error) {
-      writeLine(CHILD_TO_BRIDGE_FD, {
+      writeLine({
         kind: "reply",
         id: message.id,
         error: error instanceof Error ? error.message : String(error),
@@ -409,7 +390,7 @@ export default function bbExtension(pi) {
             { once: true },
           );
         }
-        writeLine(CHILD_TO_BRIDGE_FD, {
+        writeLine({
           kind: "tool-call",
           id,
           toolName: tool.name,
@@ -423,7 +404,7 @@ export default function bbExtension(pi) {
   pi.on("session_start", async (_event, ctx) => {
     sessionContext = ctx;
     installDetachedEventSubscriptions();
-    writeLine(CHILD_TO_BRIDGE_FD, {
+    writeLine({
       kind: "model-scope",
       ...currentModelScope(),
     });
@@ -440,7 +421,7 @@ export default function bbExtension(pi) {
       }
       if (missing) pi.setActiveTools([...active]);
     }
-    writeLine(CHILD_TO_BRIDGE_FD, { kind: "ready", agentSettled: supportsAgentSettlement(PiRuntime.VERSION) });
+    writeLine({ kind: "ready", agentSettled: supportsAgentSettlement(PiRuntime.VERSION) });
   });
 
   pi.on("session_shutdown", () => {
@@ -451,11 +432,11 @@ export default function bbExtension(pi) {
   pi.on("agent_start", (_event, ctx) => {
     sessionContext = ctx ?? sessionContext;
     runId += 1;
-    writeLine(CHILD_TO_BRIDGE_FD, { kind: "agent-start", runId, previousSettlement: lastSettlement });
+    writeLine({ kind: "agent-start", runId, previousSettlement: lastSettlement });
   });
   pi.on("agent_end", async (_event, ctx) => {
     sessionContext = ctx ?? sessionContext;
-    writeLine(CHILD_TO_BRIDGE_FD, { kind: "agent-end-leaf", leafId: currentLeafId() });
+    writeLine({ kind: "agent-end-leaf", leafId: currentLeafId() });
   });
   pi.on("agent_settled", async (_event, ctx) => {
     sessionContext = ctx ?? sessionContext;
@@ -465,7 +446,7 @@ export default function bbExtension(pi) {
       event: { ..._event },
       ...(ctx?.isIdle?.() === false ? { error: "Pi settlement handler ran after another extension started a new run" } : {}),
     };
-    writeLine(CHILD_TO_BRIDGE_FD, { kind: "agent-settled-leaf", ...lastSettlement });
+    writeLine({ kind: "agent-settled-leaf", ...lastSettlement });
   });
 }
 

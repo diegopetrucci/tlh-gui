@@ -105,7 +105,7 @@ the plugin.
 Agents discover plugin commands through the server-generated
 `plugin-commands` skill, which lists each command's `summary` and the
 `commands` usage lines — fill both in. Combined stdout and stderr must fit
-`PLUGIN_CLI_OUTPUT_MAX_BYTES` from `@get-bb/plugin-sdk` (1,048,576 UTF-8 bytes).
+`PLUGIN_CLI_OUTPUT_MAX_BYTES` from `@get-bb/plugin-sdk` (33,554,432 UTF-8 bytes, 32 MiB).
 The host rejects a larger result atomically as `plugin_cli_output_too_large`;
 it never clips it. Page growing collections, cap verbose fields, and use
 file/streaming commands for large content. Caveat: under the workspace
@@ -246,9 +246,9 @@ throwing callback fail closed for that plugin only.
 Instruction ordering is standard BB instructions, selected tools' static
 snippets, `contributeInstructions` output, `configure` dynamic instructions,
 data-dir user instructions, then workspace instructions. Tool snippets above
-4096 characters reject the registration; each callback contribution is
-truncated to 4096 characters, and a throwing `contributeInstructions` is
-logged and contributes nothing.
+4096 characters reject the registration; each `contributeInstructions` and
+`configure` result is truncated to 32768 characters, and a throwing
+`contributeInstructions` is logged and contributes nothing.
 
 ### bb.experimental_aiServices — titles, commit messages, and voice
 

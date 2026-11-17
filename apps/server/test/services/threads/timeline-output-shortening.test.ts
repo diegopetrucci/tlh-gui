@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { ThreadTimelineResponse, TimelineRow } from "@bb/server-contract";
+import type { TimelineRow } from "@bb/server-contract";
+import type { ThreadTimelineWindow } from "../../../src/services/threads/timeline.js";
 import {
   DEFAULT_MAX_INLINE_OUTPUT_CHARS,
   shortenTimelineResponseOutputs,
 } from "../../../src/services/threads/timeline-output-shortening.js";
 
-function truncateOnly(input: ThreadTimelineResponse): ThreadTimelineResponse {
+function truncateOnly(input: ThreadTimelineWindow): ThreadTimelineWindow {
   return shortenTimelineResponseOutputs(input, {
     maxInlineOutputChars: DEFAULT_MAX_INLINE_OUTPUT_CHARS,
     preview: false,
@@ -22,7 +23,7 @@ const base = {
   createdAt: 0,
 };
 
-function response(rows: TimelineRow[]): ThreadTimelineResponse {
+function response(rows: TimelineRow[]): ThreadTimelineWindow {
   return {
     rows,
     contextBoundarySeq: null,
@@ -32,7 +33,7 @@ function response(rows: TimelineRow[]): ThreadTimelineResponse {
     activeWorkflows: [],
     activeBackgroundCommands: [],
     pendingTodos: null,
-    goal: null,
+    extensionStates: {},
     providerCommands: null,
     sessionOptions: null,
     tlhStatus: null,
@@ -55,6 +56,7 @@ function commandRow(output: string): TimelineRow {
     workKind: "command",
     callId: "c1",
     command: "echo",
+    description: null,
     cwd: null,
     source: null,
     output,
@@ -78,6 +80,18 @@ describe("shortenTimelineResponseOutputs", () => {
     expect(
       row.output.startsWith("x".repeat(DEFAULT_MAX_INLINE_OUTPUT_CHARS)),
     ).toBe(true);
+  });
+
+  it("does not split a surrogate pair at the cap", () => {
+    const head = "x".repeat(DEFAULT_MAX_INLINE_OUTPUT_CHARS - 1);
+    const out = truncateOnly(
+      response([commandRow(`${head}\u{1F600}${"y".repeat(10)}`)]),
+    );
+    const row = out.rows[0] as Extract<
+      TimelineRow,
+      { kind: "work"; workKind: "command" }
+    >;
+    expect(row.output).toBe(`${head}\n…[12 more characters truncated]`);
   });
 
   it("leaves small outputs and their row identity untouched", () => {

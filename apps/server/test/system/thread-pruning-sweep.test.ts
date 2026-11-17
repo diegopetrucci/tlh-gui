@@ -8,11 +8,14 @@ import {
   noopNotifier,
   getNextThreadPruningPolicy,
   getThreadEventRewriteGeneration,
+  pendingInteractions,
   threadPruningCursors,
   threads,
 } from "@bb/db";
 import {
-  threadTimelineResponseSchema,
+  applyThreadTimelineDelta,
+  isThreadTimelineDelta,
+  threadTimelineReadResponseSchema,
   type ThreadTimelineResponse,
 } from "@bb/server-contract";
 import {
@@ -53,15 +56,23 @@ function seed(harness: TestAppHarness, count: number) {
 async function getTimeline(
   harness: TestAppHarness,
   threadId: string,
-  afterSequence?: number,
+  held?: ThreadTimelineResponse,
 ): Promise<ThreadTimelineResponse> {
-  const query =
-    afterSequence === undefined ? "" : `?afterSequence=${afterSequence}`;
+  const query = held === undefined ? "" : `?afterTag=${held.tag}`;
   const response = await harness.app.request(
     `/api/v1/threads/${threadId}/timeline${query}`,
   );
   expect(response.status).toBe(200);
-  return threadTimelineResponseSchema.parse(await readJson(response));
+  const body = threadTimelineReadResponseSchema.parse(await readJson(response));
+  if (!isThreadTimelineDelta(body)) {
+    return body;
+  }
+  const applied =
+    held === undefined ? null : applyThreadTimelineDelta(held, body);
+  if (applied === null) {
+    throw new Error("timeline delta did not apply to the held window");
+  }
+  return applied;
 }
 
 function removedEvents(fields: unknown): boolean {
@@ -73,27 +84,91 @@ function removedEvents(fields: unknown): boolean {
   );
 }
 
+function setThreadStatus(
+  harness: TestAppHarness,
+  threadId: string,
+  status: "active" | "idle" | "starting",
+) {
+  harness.db
+    .update(threads)
+    .set({ status })
+    .where(eq(threads.id, threadId))
+    .run();
+}
+
+function addInteraction(
+  harness: TestAppHarness,
+  threadId: string,
+  status: "pending" | "resolving",
+) {
+  harness.db
+    .insert(pendingInteractions)
+    .values({
+      id: `${threadId}-interaction`,
+      threadId,
+      status,
+      payload: "{}",
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    .run();
+}
+
+function threadEvents(harness: TestAppHarness, threadId: string) {
+  return harness.db
+    .select()
+    .from(events)
+    .where(eq(events.threadId, threadId))
+    .orderBy(events.sequence)
+    .all();
+}
+
+function sequences(harness: TestAppHarness, threadId: string) {
+  return threadEvents(harness, threadId).map((event) => event.sequence);
+}
+
 const UNTIMED_SWEEP_LIMITS: ThreadPruningSweepLimits = {
   elapsedBudgetMs: Number.POSITIVE_INFINITY,
   maxAdvances: THREAD_PRUNING_SWEEP_LIMITS.maxAdvances,
 };
 
 describe("thread pruning sweep", () => {
-  it("skips busy work and rechecks activity after a committed advance", async () => {
+  it("prunes settled threads while other threads are busy and leaves busy threads' events untouched", async () => {
     await withTestHarness(async (harness) => {
-      const thread = seed(harness, 1200);
-      harness.db
-        .update(threads)
-        .set({ status: "active" })
-        .where(eq(threads.id, thread.id))
-        .run();
+      const busy = {
+        active: seed(harness, 600),
+        starting: seed(harness, 600),
+        pending: seed(harness, 600),
+        resolving: seed(harness, 600),
+      };
+      const settled = [seed(harness, 600), seed(harness, 600)];
+      setThreadStatus(harness, busy.active.id, "active");
+      setThreadStatus(harness, busy.starting.id, "starting");
+      addInteraction(harness, busy.pending.id, "pending");
+      addInteraction(harness, busy.resolving.id, "resolving");
+      const busyIds = Object.values(busy).map((thread) => thread.id);
+      const before = busyIds.map((id) => threadEvents(harness, id));
+
       await runThreadPruningSweep(harness.deps, UNTIMED_SWEEP_LIMITS);
-      expect(harness.db.select().from(threadPruningCursors).all()).toEqual([]);
-      harness.db
-        .update(threads)
-        .set({ status: "idle" })
-        .where(eq(threads.id, thread.id))
-        .run();
+
+      for (const thread of settled)
+        expect(sequences(harness, thread.id)).toEqual([600]);
+      expect(busyIds.map((id) => threadEvents(harness, id))).toEqual(before);
+
+      setThreadStatus(harness, busy.active.id, "idle");
+      setThreadStatus(harness, busy.starting.id, "idle");
+      harness.db.update(pendingInteractions).set({ status: "resolved" }).run();
+      await runThreadPruningSweep(harness.deps, UNTIMED_SWEEP_LIMITS);
+      for (const id of busyIds) expect(sequences(harness, id)).toEqual([600]);
+    });
+  });
+
+  it("leaves a thread that becomes busy mid-visit and keeps advancing other threads", async () => {
+    await withTestHarness(async (harness) => {
+      const [thread, other] = [seed(harness, 1200), seed(harness, 1200)].sort(
+        (a, b) => a.id.localeCompare(b.id),
+      );
+      if (!thread || !other) throw new Error("Missing pruning fixtures");
       const generation = getThreadEventRewriteGeneration(thread.id);
       const notify = vi
         .spyOn(harness.deps.hub, "notifyThread")
@@ -103,26 +178,26 @@ describe("thread pruning sweep", () => {
         .mockImplementation((fields, message) => {
           if (
             message === "Thread pruning policy advanced" &&
-            removedEvents(fields)
+            removedEvents(fields) &&
+            getThreadEventRewriteGeneration(thread.id) === generation + 1
           ) {
-            expect(getThreadEventRewriteGeneration(thread.id)).toBeGreaterThan(
-              generation,
-            );
-            expect(harness.db.select().from(events).all()).toHaveLength(700);
-            harness.db
-              .update(threads)
-              .set({ status: "active" })
-              .where(eq(threads.id, thread.id))
-              .run();
+            expect(sequences(harness, thread.id)).toHaveLength(700);
+            setThreadStatus(harness, thread.id, "active");
           }
         });
       await runThreadPruningSweep(harness.deps, UNTIMED_SWEEP_LIMITS);
-      expect(notify).toHaveBeenCalledExactlyOnceWith(thread.id, [
-        "history-compacted",
-      ]);
-      expect(harness.db.select().from(events).all()).toHaveLength(700);
-      notify.mockRestore();
       debug.mockRestore();
+      expect(sequences(harness, thread.id)).toHaveLength(700);
+      expect(sequences(harness, other.id)).toEqual([1200]);
+      expect(notify.mock.calls).toEqual([
+        [thread.id, ["history-compacted"]],
+        [other.id, ["history-compacted"]],
+      ]);
+      notify.mockRestore();
+
+      setThreadStatus(harness, thread.id, "idle");
+      await runThreadPruningSweep(harness.deps, UNTIMED_SWEEP_LIMITS);
+      expect(sequences(harness, thread.id)).toEqual([1200]);
     });
   });
 
@@ -165,7 +240,7 @@ describe("thread pruning sweep", () => {
     });
   });
 
-  it("notifies one history compaction per thread and answers every earlier viewer with a full timeline", async () => {
+  it("notifies one history compaction per thread and brings every earlier viewer to the compacted timeline", async () => {
     await withTestHarness(async (harness) => {
       const thread = seed(harness, 2400);
       harness.db
@@ -202,12 +277,11 @@ describe("thread pruning sweep", () => {
       ]);
       expect(harness.db.select().from(events).all().length).toBeLessThan(2401);
       const cold = await getTimeline(harness, thread.id);
-      const firstViewer = await getTimeline(harness, thread.id, before.maxSeq);
-      const secondViewer = await getTimeline(harness, thread.id, before.maxSeq);
+      const firstViewer = await getTimeline(harness, thread.id, before);
+      const secondViewer = await getTimeline(harness, thread.id, before);
       for (const after of [firstViewer, secondViewer]) {
         expect(after.maxSeq).toBe(before.maxSeq);
-        expect(after.delta).toBeUndefined();
-        expect(after.rows).toEqual(cold.rows);
+        expect(after).toEqual(cold);
       }
       harness.db
         .insert(events)
@@ -224,11 +298,9 @@ describe("thread pruning sweep", () => {
           createdAt: 2,
         })
         .run();
-      const caughtUp = await getTimeline(harness, thread.id, before.maxSeq);
-      expect(caughtUp.delta).toBeUndefined();
+      const caughtUp = await getTimeline(harness, thread.id, before);
       expect(caughtUp.maxSeq).toBe(2402);
-      const next = await getTimeline(harness, thread.id, caughtUp.maxSeq);
-      expect(next.delta).toEqual({ upsertRows: [] });
+      expect(caughtUp).toEqual(await getTimeline(harness, thread.id));
       notify.mockRestore();
       debug.mockRestore();
     });

@@ -6,6 +6,7 @@ import {
   server,
   session,
   type ConnectDb,
+  first,
 } from "@bb/connect-db";
 import { SettledLookupCache } from "./session.js";
 
@@ -14,7 +15,8 @@ const DESKTOP_SESSION_REFRESH_BEFORE_EXPIRY_MS =
   (CONNECT_SESSION_EXPIRES_IN_SECONDS - CONNECT_SESSION_UPDATE_AGE_SECONDS) *
   1000;
 const LEGACY_DESKTOP_SESSION_TTL_MS = 60 * 60 * 1000;
-const GRANT_TTL_MS = 20_000;
+const GRANT_TTL_MS = 60_000;
+const GRANT_MISS_TTL_MS = 20_000;
 
 export type DesktopSessionGrant =
   | { kind: "machine"; credentialHash: string }
@@ -195,42 +197,48 @@ async function lookupGrantUserId(
 ): Promise<string | null> {
   switch (grant.kind) {
     case "machine": {
-      const row = await db
-        .select({ userId: machine.userId })
-        .from(machine)
-        .where(
-          and(
-            eq(machine.credentialHash, grant.credentialHash),
-            isNull(machine.revokedAt),
-          ),
-        )
-        .get();
+      const row = await first(
+        db
+          .select({ userId: machine.userId })
+          .from(machine)
+          .where(
+            and(
+              eq(machine.credentialHash, grant.credentialHash),
+              isNull(machine.revokedAt),
+            ),
+          )
+          .limit(1),
+      );
       return row?.userId ?? null;
     }
     case "server": {
-      const row = await db
-        .select({ userId: server.userId })
-        .from(server)
-        .where(
-          and(
-            eq(server.credentialHash, grant.credentialHash),
-            isNull(server.revokedAt),
-          ),
-        )
-        .get();
+      const row = await first(
+        db
+          .select({ userId: server.userId })
+          .from(server)
+          .where(
+            and(
+              eq(server.credentialHash, grant.credentialHash),
+              isNull(server.revokedAt),
+            ),
+          )
+          .limit(1),
+      );
       return row?.userId ?? null;
     }
     case "session": {
-      const row = await db
-        .select({ userId: session.userId })
-        .from(session)
-        .where(
-          and(
-            eq(session.id, grant.sessionId),
-            gt(session.expiresAt, new Date(now)),
-          ),
-        )
-        .get();
+      const row = await first(
+        db
+          .select({ userId: session.userId })
+          .from(session)
+          .where(
+            and(
+              eq(session.id, grant.sessionId),
+              gt(session.expiresAt, new Date(now)),
+            ),
+          )
+          .limit(1),
+      );
       return row?.userId ?? null;
     }
   }
@@ -243,7 +251,8 @@ function resolveGrantUserId(
 ): Promise<string | null> {
   return grantCache.read(grantKey(grant), {
     now,
-    expires: () => now + GRANT_TTL_MS,
+    expires: (userId) =>
+      now + (userId === null ? GRANT_MISS_TTL_MS : GRANT_TTL_MS),
     load: () => lookupGrantUserId(grant, db, now),
   });
 }

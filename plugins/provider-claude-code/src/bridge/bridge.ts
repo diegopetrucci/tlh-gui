@@ -35,7 +35,6 @@ import { randomUUID } from "node:crypto";
 import { join as joinPath, resolve as resolvePath } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
-  forkSession,
   type CanUseTool,
   type HookCallback,
   type PermissionResult,
@@ -63,6 +62,7 @@ import {
   type SdkSessionOptions,
 } from "./sdk-session.js";
 import { MissingClaudeCliError } from "./missing-cli-error.js";
+import { claudeConfigDirectory, forkClaudeSession } from "./session-fork.js";
 import { createClaudeCodeBridgeModelListMemo } from "./model-list.js";
 import {
   PROVIDER_COMMANDS_STATE_KIND,
@@ -169,7 +169,19 @@ const promptInputItemSchema = z.discriminatedUnion("type", [
   }),
 ]);
 
-const CLAUDE_PROVIDER_SUBAGENT_TOOL_NAMES = new Set(["Agent", "Task"]);
+const CLAUDE_PROVIDER_SUBAGENT_TOOL_NAMES = new Set([
+  "Agent",
+  "Task",
+  "ListAgents",
+]);
+
+function subagentDisallowedTools(
+  providerSubagentsEnabled: boolean,
+): string[] | undefined {
+  return providerSubagentsEnabled
+    ? undefined
+    : [...CLAUDE_PROVIDER_SUBAGENT_TOOL_NAMES];
+}
 const CLAUDE_WORKFLOW_TOOL_NAME = "Workflow";
 
 interface BridgeEventNotification {
@@ -307,6 +319,8 @@ interface SessionConstructionConfig {
 }
 
 interface ClaudeLiveSessionSettings {
+  commandDescriptionsEnabled: boolean;
+  fullAccessApprovalsEnabled: boolean;
   memoryEnabled: boolean;
   model?: string;
   providerSubagentsEnabled: boolean;
@@ -449,6 +463,34 @@ function applyChromeSetting(
   if (attachment.residentSession) {
     attachment.residentSession.restartBeforeNextTurn = {
       reason: CLAUDE_CHROME_SETTING_RESTART_REASON,
+      showRuntimeNote: false,
+    };
+  }
+}
+
+function applySubagentSetting(
+  attachment: ThreadAttachment,
+  enabled: boolean | undefined,
+): void {
+  if (
+    enabled === undefined ||
+    attachment.liveSettings.providerSubagentsEnabled === enabled
+  ) {
+    return;
+  }
+  const disallowedTools = subagentDisallowedTools(enabled);
+  if (disallowedTools === undefined) {
+    delete attachment.sessionOptions.disallowedTools;
+  } else {
+    attachment.sessionOptions.disallowedTools = disallowedTools;
+  }
+  attachment.liveSettings = {
+    ...attachment.liveSettings,
+    providerSubagentsEnabled: enabled,
+  };
+  if (attachment.residentSession) {
+    attachment.residentSession.restartBeforeNextTurn = {
+      reason: "Claude Code subagent setting changed",
       showRuntimeNote: false,
     };
   }
@@ -812,6 +854,9 @@ async function applyLiveSessionSettings(
     });
   }
 
+  threadSession.translator.configureCommandDescriptions(
+    next.commandDescriptionsEnabled,
+  );
   threadSession.attachment.liveSettings = next;
 }
 
@@ -1035,6 +1080,8 @@ function toInitialLiveSessionSettings(
   params: SessionConstructionParams,
 ): ClaudeLiveSessionSettings {
   return {
+    commandDescriptionsEnabled: params.commandDescriptionsEnabled ?? false,
+    fullAccessApprovalsEnabled: params.fullAccessApprovalsEnabled,
     memoryEnabled: params.memoryEnabled ?? true,
     ...(params.model !== undefined ? { model: params.model } : {}),
     providerSubagentsEnabled: params.providerSubagentsEnabled ?? true,
@@ -1053,6 +1100,10 @@ function withTurnLiveSessionSettings(
   const model = params.model ?? current.model;
   const reasoningLevel = params.reasoningLevel ?? current.reasoningLevel;
   return {
+    commandDescriptionsEnabled:
+      params.commandDescriptionsEnabled ?? current.commandDescriptionsEnabled,
+    fullAccessApprovalsEnabled:
+      params.fullAccessApprovalsEnabled ?? current.fullAccessApprovalsEnabled,
     memoryEnabled: params.memoryEnabled ?? current.memoryEnabled,
     ...(model !== undefined ? { model } : {}),
     providerSubagentsEnabled:
@@ -1117,6 +1168,8 @@ function createThreadSession(attachment: ThreadAttachment): ThreadSession {
   const translator = createClaudeDeltaTranslator({
     cwd: attachment.sessionConstructionConfig.sessionOptions.cwd,
     sandboxEnabled: attachment.sessionOptions.sandbox?.enabled === true,
+    commandDescriptionsEnabled:
+      attachment.liveSettings.commandDescriptionsEnabled,
   });
   translator.configureInjectedTools(
     (attachment.sessionConstructionConfig.dynamicTools ?? []).map((tool) => ({
@@ -1401,6 +1454,12 @@ function buildTrackedSessionOptions(
     env,
   );
   sessionOptions.permissionMode = params.permissionMode;
+  const disallowedTools = subagentDisallowedTools(
+    params.providerSubagentsEnabled ?? true,
+  );
+  if (disallowedTools !== undefined) {
+    sessionOptions.disallowedTools = disallowedTools;
+  }
   sessionOptions.hooks = buildSessionTrackingHooks(threadIdRef);
   sessionOptions.recordThreadId = () => threadIdRef.current;
   return sessionOptions;
@@ -1670,6 +1729,12 @@ function createOnSdkDone(
     if (!threadSession) return;
 
     threadSession.streamEnded = true;
+    sendThreadDeltas(
+      args.threadIdRef.current,
+      threadSession.translator.buildBackgroundTaskSettlementDeltas(
+        args.threadIdRef.current,
+      ),
+    );
     resolvePendingSessionWork(
       threadSession,
       "Claude SDK stream ended before pending work completed",
@@ -1966,7 +2031,6 @@ function createForwardInteractiveRequest(
           threadId: args.threadId,
           providerThreadId: args.providerThreadId,
           turnId: null,
-          providerNativeIds: true,
           payload,
         },
       });
@@ -2027,7 +2091,6 @@ function createForwardUserQuestionRequest(
           threadId: args.threadId,
           providerThreadId: args.providerThreadId,
           turnId: null,
-          providerNativeIds: true,
           payload,
         },
       });
@@ -2171,7 +2234,8 @@ function createCanUseTool(threadIdRef: ThreadIdRef): CanUseTool {
 
     if (
       threadSession.attachment.permissionMode === "bypassPermissions" &&
-      !isBypassPermissionsAvailable()
+      (!isBypassPermissionsAvailable() ||
+        !threadSession.attachment.liveSettings.fullAccessApprovalsEnabled)
     ) {
       return {
         behavior: "allow",
@@ -2466,12 +2530,14 @@ async function handleThreadFork(
 
   let forkedProviderThreadId: string;
   try {
-    const forkResult = await forkSession(params.sourceProviderThreadId, {
-      ...(params.sourceProviderCheckpointId !== undefined
-        ? { upToMessageId: params.sourceProviderCheckpointId }
-        : {}),
+    forkedProviderThreadId = await forkClaudeSession({
+      configDirectory: claudeConfigDirectory(
+        buildSessionEnv(readConfigEnvOverrides(params.config)),
+        params.cwd,
+      ),
+      sourceSessionId: params.sourceProviderThreadId,
+      upToMessageId: params.sourceProviderCheckpointId,
     });
-    forkedProviderThreadId = forkResult.sessionId;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     sendError(id, -32000, message);
@@ -2523,6 +2589,7 @@ async function runTurnInput(
       applyTurnEnvironment(attachment, params.config);
     }
     applyChromeSetting(attachment, params.chromeEnabled);
+    applySubagentSetting(attachment, params.providerSubagentsEnabled);
     applyContextWindowSetting(attachment, params.disable1MContext);
     applyArtifactSetting(attachment, params.artifactsEnabled);
   }
@@ -2673,21 +2740,6 @@ function localAttachmentMarker(args: {
   return `[Attached ${args.kind}${namePart}${suffix}. It is on disk at ${args.path} — use the Read tool to view it.]`;
 }
 
-function normalizeClaudeSkillMentions(
-  entry: Extract<z.infer<typeof promptInputItemSchema>, { type: "text" }>,
-): string {
-  const replacements = new Set<number>();
-  for (const mention of selectedSkillMentions(entry)) {
-    if (mention.resource.trigger === "$") replacements.add(mention.start);
-  }
-
-  let normalized = entry.text;
-  for (const start of replacements) {
-    normalized = `${normalized.slice(0, start)}/${normalized.slice(start + 1)}`;
-  }
-  return normalized;
-}
-
 function buildPromptText(input: unknown): string | undefined {
   if (typeof input === "string") {
     return input.length > 0 ? input : undefined;
@@ -2695,14 +2747,29 @@ function buildPromptText(input: unknown): string | undefined {
   if (!Array.isArray(input)) return undefined;
 
   const chunks: string[] = [];
+  const skills: {
+    chunkIndex: number;
+    start: number;
+    end: number;
+    name: string;
+  }[] = [];
   for (const item of input) {
     const parsed = promptInputItemSchema.safeParse(item);
     if (!parsed.success) continue;
     const entry = parsed.data;
     switch (entry.type) {
       case "text":
-        if (entry.text.length > 0)
-          chunks.push(normalizeClaudeSkillMentions(entry));
+        if (entry.text.length > 0) {
+          const chunkIndex = chunks.push(entry.text) - 1;
+          for (const mention of selectedSkillMentions(entry)) {
+            skills.push({
+              chunkIndex,
+              start: mention.start,
+              end: mention.end,
+              name: mention.resource.name,
+            });
+          }
+        }
         break;
       case "image":
         chunks.push(`[Attached image: ${entry.url}]`);
@@ -2722,6 +2789,20 @@ function buildPromptText(input: unknown): string | undefined {
         );
         break;
     }
+  }
+
+  const [skill] = skills;
+  if (skills.length === 1 && skill) {
+    const chunk = chunks[skill.chunkIndex]!;
+    chunks[skill.chunkIndex] =
+      `${chunk.slice(0, skill.start)}${chunk.slice(skill.end)}`;
+    const argumentsText = chunks.join("\n");
+    const separator = argumentsText.startsWith(" ") ? "" : " ";
+    return `/${skill.name}${argumentsText ? `${separator}${argumentsText}` : ""}`;
+  }
+  for (const { chunkIndex, start } of skills) {
+    const chunk = chunks[chunkIndex]!;
+    chunks[chunkIndex] = `${chunk.slice(0, start)}/${chunk.slice(start + 1)}`;
   }
 
   return chunks.length > 0 ? chunks.join("\n") : undefined;

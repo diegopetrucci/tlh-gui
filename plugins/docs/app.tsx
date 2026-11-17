@@ -9,6 +9,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import {
+  experimental_useAppPanel,
   definePluginApp,
   experimental_FileLink as FileLink,
   experimental_copyToClipboard,
@@ -59,14 +60,13 @@ import {
 import StarterKit from "@tiptap/starter-kit";
 import Link from "@tiptap/extension-link";
 import Image from "@tiptap/extension-image";
-import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
 import Placeholder from "@tiptap/extension-placeholder";
-import Table from "@tiptap/extension-table";
 import TableCell from "@tiptap/extension-table-cell";
 import TableHeader from "@tiptap/extension-table-header";
 import TableRow from "@tiptap/extension-table-row";
 import { Markdown } from "tiptap-markdown";
+import { MarkdownTable, TightTaskList } from "./editor-extensions.js";
 import {
   loadMarkdownBlocks,
   saveMarkdownBlocks,
@@ -520,9 +520,12 @@ function TiptapEditor(props: {
         createProposalDiff({ getBaseDocument: () => baselineRef.current }),
         Link.configure({ openOnClick: false, autolink: true }),
         Image.configure({ allowBase64: false }),
-        TaskList,
+        TightTaskList,
         TaskItem.configure({ nested: true }),
-        Table.configure({ resizable: true, lastColumnResizable: false }),
+        MarkdownTable.configure({
+          resizable: true,
+          lastColumnResizable: false,
+        }),
         TableRow,
         TableHeader,
         TableCell,
@@ -1258,6 +1261,7 @@ function InlineDocument({
 
 function DocsDirectiveCard({ attributes }: PluginMessageDirectiveProps) {
   const navigate = useBbNavigate();
+  const panel = experimental_useAppPanel();
   const document = parseDocumentRef(attributes);
   if (!document) {
     return (
@@ -1271,8 +1275,12 @@ function DocsDirectiveCard({ attributes }: PluginMessageDirectiveProps) {
       subPath: `${document.vaultId}/${document.path}`,
     });
   const openPreview = (title = document.title) => {
-    const opened = navigate.openThreadPanel({
-      actionId: "document",
+    const opened = panel.openTab({
+      tab: {
+        id: "document",
+        context: { kind: "thread" },
+        availability: "action",
+      },
       title,
       params: {
         vaultId: document.vaultId,
@@ -1345,6 +1353,7 @@ function HtmlPreview({
 function DocumentPicker() {
   const [subPath, setSubPath] = useState("");
   const navigate = useBbNavigate();
+  const panel = experimental_useAppPanel();
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-4">
       <p className="text-sm text-muted-foreground">
@@ -1361,8 +1370,12 @@ function DocumentPicker() {
               /\.(md|html?)$/i,
               "",
             );
-            navigate.openThreadPanel({
-              actionId: "document",
+            panel.openTab({
+              tab: {
+                id: "document",
+                context: { kind: "thread" },
+                availability: "action",
+              },
               title,
               params: { vaultId, path: filePath, title },
             });

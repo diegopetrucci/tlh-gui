@@ -123,8 +123,11 @@ jobs:
           - shard: integration
             filter: --filter=@bb/integration-tests
             vitestShard: ""
-          - shard: plugins
-            filter: --filter='bb-plugin-*'
+          - shard: plugins-1
+            filter: --filter='bb-plugin-provider-*' --filter=bb-plugin-tasks --filter=bb-plugin-connect --filter=bb-plugin-thread-list
+            vitestShard: ""
+          - shard: plugins-2
+            filter: --filter='bb-plugin-*' --filter='!bb-plugin-provider-*' --filter='!bb-plugin-tasks' --filter='!bb-plugin-connect' --filter='!bb-plugin-thread-list'
             vitestShard: ""
           - shard: packages-host
             filter: --filter=@bb/host-daemon --filter=@bb/cli --filter=@bb/agent-runtime --filter=@bb/provider-parity --filter=@bb/db
@@ -179,7 +182,7 @@ jobs:
           bash .github/actions/setup-workspace/install-dependencies.sh "${filters[@]}"
 
       - name: Setup Bun
-        if: ${{ startsWith(matrix.shard, 'packages-') || matrix.shard == 'plugins' }}
+        if: ${{ startsWith(matrix.shard, 'packages-') || startsWith(matrix.shard, 'plugins-') }}
         timeout-minutes: 4
         uses: ./.github/actions/setup-bun
         with:
