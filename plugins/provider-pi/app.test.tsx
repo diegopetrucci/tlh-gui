@@ -42,6 +42,7 @@ describe("tlh provider icons", () => {
     const { container } = render_(<Icon className="size-full" />);
     const svg = container.querySelector("svg")!;
     expect(svg.getAttribute("class")).toBe("size-full");
+    expect(svg.getAttribute("style")).toContain("contain: size");
     expect(container.innerHTML).toContain("#f05a28");
     expect(container.innerHTML).toContain("#2bb8c5");
     expect(container.innerHTML).toContain("currentColor");
