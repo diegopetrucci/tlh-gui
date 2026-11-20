@@ -191,6 +191,7 @@ function TlhMark({ className }: { className?: string }) {
       xmlns="http://www.w3.org/2000/svg"
       viewBox="47 40 66 83.5"
       className={className}
+      style={{ contain: "size" }}
       aria-hidden="true"
     >
       <path d="M48 40h24v72H48zM88 40h24v72H88z" fill="currentColor" />
