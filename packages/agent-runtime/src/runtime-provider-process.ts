@@ -6,6 +6,7 @@ import {
   preferOutOfMemoryKill,
   sanitizeInheritedChildProcessEnv,
   spawnManagedProcess,
+  stripAgentSessionEnv,
   type ManagedProcess,
 } from "@bb/process-utils";
 import type { BridgeProtocolAdapter } from "./bridge-protocol-adapter.js";
@@ -379,7 +380,9 @@ export class RuntimeProviderProcessManager {
   private spawnProvider(args: SpawnProviderArgs): RuntimeProviderProcess {
     const processConfig = args.adapter.process;
     const env: NodeJS.ProcessEnv = {
-      ...sanitizeInheritedChildProcessEnv({ env: process.env }),
+      ...stripAgentSessionEnv(
+        sanitizeInheritedChildProcessEnv({ env: process.env }),
+      ),
       ...this.args.env,
       ...processConfig.env,
     };
