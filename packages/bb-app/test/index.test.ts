@@ -810,12 +810,20 @@ describe("bb-app launcher", () => {
         BB_PROJECT_ID: "proj_parent",
         BB_THREAD_ID: "thr_parent",
         BB_THREAD_STORAGE: "/home/tester/.bb/thread-storage/thr_parent",
+        TICKETS_DIR: "/tmp/tickets",
+        PI_SUBAGENT_RUN_ID: "run_parent",
+        PI_SUBAGENT_PI_BINARY: "/bin/pi",
+        TLH_PROGRAM_STATUS: "ok",
       },
       homeDir: "/home/tester",
       options: { help: false },
       serverUrlMode: "local",
     });
 
+    expect(runtime.serverEnv.TICKETS_DIR).toBeUndefined();
+    expect(runtime.serverEnv.PI_SUBAGENT_RUN_ID).toBeUndefined();
+    expect(runtime.serverEnv.PI_SUBAGENT_PI_BINARY).toBe("/bin/pi");
+    expect(runtime.serverEnv.TLH_PROGRAM_STATUS).toBe("ok");
     expect(runtime.serverEnv.BB_ENVIRONMENT_ID).toBeUndefined();
     expect(runtime.serverEnv.BB_THREAD_ID).toBeUndefined();
     expect(runtime.serverEnv.BB_THREAD_STORAGE).toBeUndefined();
@@ -826,6 +834,9 @@ describe("bb-app launcher", () => {
       env: runtime.env,
       serverUrl: runtime.context.serverUrl,
     });
+    expect(daemonEnv.TICKETS_DIR).toBeUndefined();
+    expect(daemonEnv.PI_SUBAGENT_RUN_ID).toBeUndefined();
+    expect(daemonEnv.PI_SUBAGENT_PI_BINARY).toBe("/bin/pi");
     expect(daemonEnv.BB_ENVIRONMENT_ID).toBeUndefined();
     expect(daemonEnv.BB_THREAD_ID).toBeUndefined();
     expect(daemonEnv.BB_THREAD_STORAGE).toBeUndefined();

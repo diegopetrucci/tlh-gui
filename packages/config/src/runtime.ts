@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
+import { stripAgentSessionEnv } from "@bb/process-utils";
 import { delimiter, isAbsolute, join, relative, resolve } from "node:path";
 
 export type BbRuntimeMode = "dev" | "prod";
@@ -310,7 +311,7 @@ export function resolvePortFromEnv(args: ResolvePortFromEnvArgs): number {
 export function stripThreadContextEnv(
   baseEnv: NodeJS.ProcessEnv,
 ): NodeJS.ProcessEnv {
-  const env = { ...baseEnv };
+  const env = stripAgentSessionEnv(baseEnv);
   for (const key of THREAD_CONTEXT_ENV_KEYS) {
     delete env[key];
   }

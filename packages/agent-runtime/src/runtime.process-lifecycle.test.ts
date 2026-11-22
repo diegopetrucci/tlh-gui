@@ -1467,6 +1467,77 @@ describe("createAgentRuntime process lifecycle", () => {
     }
   });
 
+  const tinyEnvCases: Array<{
+    name: string;
+    explicitEnv: Record<string, string>;
+    expected: string;
+  }> = [
+    {
+      name: "strips inherited",
+      explicitEnv: {},
+      expected: "missing|missing|missing|adapter-session",
+    },
+    {
+      name: "keeps explicit override over inherited",
+      explicitEnv: { TICKETS_DIR: "/tmp/explicit-tickets" },
+      expected: "/tmp/explicit-tickets|missing|missing|adapter-session",
+    },
+  ];
+
+  it.each(tinyEnvCases)(
+    "$name TICKETS_DIR at provider spawn",
+    async ({ explicitEnv, expected }) => {
+      vi.stubEnv("TICKETS_DIR", "/tmp/inherited-tickets");
+      vi.stubEnv("TLH_TICKETS_DIR_AUTO", "1");
+      vi.stubEnv("PI_SUBAGENT_CHILD", "1");
+      vi.stubEnv("PI_SESSION_ID", "inherited-session");
+      const envScript = join(tmpDir, "agent-session-env-provider.cjs");
+      writeFileSync(
+        envScript,
+        `const values = [
+        process.env.TICKETS_DIR ?? "missing",
+        process.env.TLH_TICKETS_DIR_AUTO ?? "missing",
+        process.env.PI_SUBAGENT_CHILD ?? "missing",
+        process.env.PI_SESSION_ID ?? "missing"
+      ];
+      process.stderr.write(values.join("|") + "\\n");
+      setInterval(() => {}, 1000);`,
+      );
+      const stderrLines: string[] = [];
+      const manager = createProviderProcessManager({
+        adapterProcessEnv: {
+          PI_SESSION_ID: "adapter-session",
+        },
+        env: explicitEnv,
+        onProcessExit: vi.fn(),
+        onStderr: (line) => {
+          stderrLines.push(line);
+        },
+        rawScriptPath: envScript,
+        workspacePath: tmpDir,
+      });
+
+      try {
+        const ensure = manager
+          .ensureProvider({
+            bridgeLaunch: MANAGER_BRIDGE_LAUNCH,
+            processKey: "fake",
+            providerId: "fake",
+          })
+          .catch(() => undefined);
+        await waitForRuntimeState({
+          label: "provider agent-session env stderr",
+          predicate: () => stderrLines.length > 0,
+        });
+        expect(stderrLines[0]).toBe(expected);
+        await manager.shutdown();
+        await ensure;
+      } finally {
+        await manager.shutdown();
+      }
+    },
+  );
+
   it("launches runtime-managed node bridges with the current executable when node is absent from PATH", async () => {
     vi.stubEnv("PATH", "");
     const record = createScriptedEchoRequestRecord();
